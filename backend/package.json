@@ -1,0 +1,32 @@
+{
+  "name": "energyos-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "helmet": "^8.0.0",
+    "express-rate-limit": "^7.4.0",
+    "@supabase/supabase-js": "^2.45.4",
+    "@anthropic-ai/sdk": "^0.27.3",
+    "@google/generative-ai": "^0.21.0",
+    "openai": "^4.67.3",
+    "stripe": "^16.12.0",
+    "jsonwebtoken": "^9.0.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/cors": "^2.8.17",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.7.4",
+    "typescript": "^5.5.3",
+    "tsx": "^4.19.1"
+  }
+}
