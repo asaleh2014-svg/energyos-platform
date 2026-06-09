@@ -1,0 +1,530 @@
+import { useState } from 'react'
+import {
+  X, ChevronDown, ChevronRight, Edit2, Maximize2, Printer,
+  History, Zap, Flame, Droplets, Download, ExternalLink,
+  Activity, FileText, MapPin, AlertCircle,
+} from 'lucide-react'
+import clsx from 'clsx'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend,
+} from 'recharts'
+import type { FullConnection } from '@/lib/connectionsData'
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const PRODUCT_COLOR: Record<string, string> = {
+  Electricity: '#10b981',
+  Gas:         '#f59e0b',
+  Water:       '#3b82f6',
+}
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+function makeConsumptionData(conn: FullConnection) {
+  // Generate realistic 12-month bar chart data
+  const base = conn.product === 'Electricity'
+    ? (conn.usage_normal + conn.usage_low) / 12
+    : conn.product === 'Gas'
+      ? conn.usage_normal / 12
+      : conn.usage_normal / 12
+  if (base === 0) return MONTHS.map(m => ({ month: m, target: 0, actual: 0 }))
+  const variance = [1.12, 1.08, 1.0, 0.92, 0.85, 0.82, 0.84, 0.86, 0.93, 1.0, 1.06, 1.10]
+  return MONTHS.map((m, i) => ({
+    month: m,
+    target: Math.round(base * variance[i]),
+    actual: Math.round(base * variance[i] * (0.88 + Math.random() * 0.24)),
+  }))
+}
+
+function makeCapacityLog() {
+  return [
+    { date: '01-01-2022', value: '3x250A', old: '—',     by: 'System',      on: '01-01-2022' },
+    { date: '01-06-2023', value: '3x315A', old: '3x250A', by: 'Ahmad Al-H.', on: '28-05-2023' },
+    { date: '01-01-2025', value: '3x400A', old: '3x315A', by: 'Ahmad Al-H.', on: '15-12-2024' },
+  ]
+}
+
+function makeStatusLog(conn: FullConnection) {
+  const supplier = conn.supplier
+  return [
+    { date: conn.connection_start || '01-01-2022', status: 'Active',   supplier, by: 'System' },
+    { date: '01-06-2023',                           status: 'Inactive', supplier, by: 'Ahmad Al-H.' },
+    { date: '01-07-2023',                           status: 'Active',   supplier, by: 'Ahmad Al-H.' },
+  ]
+}
+
+// ─── Sub-components ────────────────────────────────────────────────────────────
+
+function Section({
+  title, defaultOpen = true, children,
+}: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="border-b border-border-subtle">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-white/5 transition-colors"
+      >
+        <span className="text-xs font-semibold text-accent-hover uppercase tracking-widest">{title}</span>
+        {open ? <ChevronDown size={13} className="text-white/40" /> : <ChevronRight size={13} className="text-white/40" />}
+      </button>
+      {open && (
+        <div className="px-4 pb-4">
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Field({ label, value }: { label: string; value?: string | number | boolean | null }) {
+  const display = value === null || value === undefined || value === ''
+    ? <span className="text-white/25 italic">—</span>
+    : typeof value === 'boolean'
+      ? <span className={value ? 'text-success-light' : 'text-white/40'}>{value ? 'Yes' : 'No'}</span>
+      : <span className="text-white/80">{String(value)}</span>
+  return (
+    <div className="flex items-start gap-2 py-1 min-h-[22px]">
+      <div className="w-[148px] min-w-[148px] text-[10px] text-white/35 pt-0.5 leading-tight">{label}</div>
+      <div className="flex-1 text-[11px] leading-tight break-words">{display}</div>
+    </div>
+  )
+}
+
+// ─── Mini GPS map (SVG UAE projection) ────────────────────────────────────────
+
+const LON_MIN = 51.0, LON_MAX = 56.8, LAT_MIN = 22.2, LAT_MAX = 26.5
+const MW = 300, MH = 170
+
+function project(lat: number, lon: number): [number, number] {
+  const x = ((lon - LON_MIN) / (LON_MAX - LON_MIN)) * MW
+  const y = MH - ((lat - LAT_MIN) / (LAT_MAX - LAT_MIN)) * MH
+  return [x, y]
+}
+
+function MiniMap({ lat, lon, color }: { lat: number; lon: number; color: string }) {
+  const [px, py] = project(lat, lon)
+  return (
+    <div className="rounded-lg overflow-hidden border border-border-subtle bg-[#0a2a33]">
+      <svg width={MW} height={MH} viewBox={`0 0 ${MW} ${MH}`} className="w-full">
+        {/* Simplified UAE outline */}
+        <path
+          d="M40,120 L60,110 L80,100 L100,85 L130,75 L160,65 L190,58 L220,55 L250,56 L275,60 L290,70 L295,85 L288,100 L275,110 L260,118 L240,122 L220,125 L200,124 L180,125 L160,130 L140,135 L120,140 L100,138 L80,132 L60,128 Z"
+          fill="#0d3d4a" stroke="#1a6b7e" strokeWidth="1" opacity="0.6"
+        />
+        {/* Grid lines */}
+        {[0.25,0.5,0.75].map(f => (
+          <line key={`v${f}`} x1={MW*f} y1={0} x2={MW*f} y2={MH} stroke="#1a4a55" strokeWidth="0.5" opacity="0.4" />
+        ))}
+        {[0.25,0.5,0.75].map(f => (
+          <line key={`h${f}`} x1={0} y1={MH*f} x2={MW} y2={MH*f} stroke="#1a4a55" strokeWidth="0.5" opacity="0.4" />
+        ))}
+        {/* Connection dot */}
+        <circle cx={px} cy={py} r={10} fill={color} opacity={0.15} />
+        <circle cx={px} cy={py} r={6}  fill={color} opacity={0.3} />
+        <circle cx={px} cy={py} r={4}  fill={color} opacity={0.9} />
+        <circle cx={px} cy={py} r={2}  fill="white" opacity={0.9} />
+      </svg>
+    </div>
+  )
+}
+
+// ─── Main component ────────────────────────────────────────────────────────────
+
+interface Props {
+  conn: FullConnection
+  onClose: () => void
+}
+
+export default function ConnectionDetail({ conn, onClose }: Props) {
+  const color = PRODUCT_COLOR[conn.product] ?? '#6b7280'
+  const chartData = makeConsumptionData(conn)
+  const capacityLog = makeCapacityLog()
+  const statusLog = makeStatusLog(conn)
+
+  const ProductIcon = conn.product === 'Electricity' ? Zap
+    : conn.product === 'Gas' ? Flame : Droplets
+
+  const unit = conn.product === 'Electricity' ? 'kWh' : conn.product === 'Gas' ? 'm³' : 'm³'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-stretch justify-end">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      {/* Panel */}
+      <div className="relative z-10 flex flex-col w-full max-w-[1100px] bg-bg-secondary shadow-2xl border-l border-border-subtle">
+
+        {/* ── Header ────────────────────────────────────────────────────── */}
+        <div className="min-h-[72px] px-5 py-3 border-b border-border-subtle"
+          style={{ background: `linear-gradient(135deg, #0d3d4a 0%, #0a2a33 100%)` }}
+        >
+          <div className="flex items-start gap-3">
+            {/* Product icon */}
+            <div className="mt-1 w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={{ background: `${color}25`, border: `1px solid ${color}40` }}>
+              <ProductIcon size={17} style={{ color }} />
+            </div>
+
+            {/* Title block */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold text-white truncate">{conn.name}</h2>
+                <span
+                  className="text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0"
+                  style={{ background: `${color}20`, color, border: `1px solid ${color}30` }}
+                >
+                  {conn.product}
+                </span>
+                <span className={clsx(
+                  'text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0',
+                  conn.status === 'Active'   && 'bg-success/15 text-success-light',
+                  conn.status === 'Inactive' && 'bg-danger/15 text-danger-light',
+                  conn.status === 'Pending'  && 'bg-warning/15 text-warning-light',
+                )}>
+                  {conn.status}
+                </span>
+              </div>
+              <div className="text-[11px] text-white/45 mt-0.5 font-mono">{conn.ean_code}</div>
+              <div className="text-[11px] text-white/40 mt-0.5">
+                Active since <span className="text-accent-hover">{conn.active_since}</span> with <span className="text-white/60">{conn.supplier}</span>
+                {conn.contract && <> · Contract: <span className="text-white/55">{conn.contract}</span></>}
+              </div>
+            </div>
+
+            {/* Action icons */}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {[
+                { Icon: Edit2,    title: 'Edit' },
+                { Icon: Maximize2,title: 'Expand' },
+                { Icon: Printer,  title: 'Print' },
+                { Icon: History,  title: 'History' },
+              ].map(({ Icon, title }) => (
+                <button key={title} title={title}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors">
+                  <Icon size={15} />
+                </button>
+              ))}
+              <button onClick={onClose} title="Close"
+                className="w-8 h-8 flex items-center justify-center rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors ml-1">
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Body (two columns) ─────────────────────────────────────────── */}
+        <div className="flex flex-1 overflow-hidden">
+
+          {/* Left column — info sections */}
+          <div className="w-[340px] min-w-[340px] border-r border-border-subtle overflow-y-auto bg-bg-primary/30">
+
+            <Section title="Client">
+              <Field label="Client"                 value={conn.client} />
+              <Field label="Department"              value={conn.department} />
+              <Field label="Name on account"         value={conn.name} />
+              <Field label="Invoice address"         value={conn.invoice_address} />
+              <Field label="Responsible"             value={conn.responsible} />
+              <Field label="Requested by"            value={conn.requested_by} />
+              <Field label="Contact person"          value={conn.contact_person} />
+            </Section>
+
+            <Section title="Connection">
+              <Field label="Connection name"         value={conn.name} />
+              <Field label="Object code"             value={conn.object_code} />
+              <Field label="Allocation type"         value={conn.allocation_type} />
+              <Field label="Product"                 value={conn.product} />
+              <Field label="EAN code"                value={conn.ean_code} />
+              <Field label="Characteristic"          value={conn.characteristic} />
+              <Field label="Connection type"         value={conn.connection_type} />
+            </Section>
+
+            <Section title="Address & Location">
+              <Field label="Street"                  value={conn.street} />
+              <Field label="House number"            value={conn.house_number} />
+              <Field label="Addition"                value={conn.addition} />
+              <Field label="Postcode"                value={conn.postcode} />
+              <Field label="City"                    value={conn.city} />
+              <Field label="GPS"                     value={conn.gps} />
+            </Section>
+
+            <Section title="Building" defaultOpen={false}>
+              <Field label="Building"                value={conn.building} />
+              <Field label="Energy label"            value={conn.energy_label} />
+            </Section>
+
+            <Section title="Characteristics" defaultOpen={false}>
+              <Field label="Usage category"          value={conn.usage_category} />
+              <Field label="Usage type"              value={conn.usage_type} />
+              <Field label="Market segment code"     value={conn.market_seg_code} />
+              <Field label="Monitoring"              value={conn.monitoring} />
+            </Section>
+
+            <Section title="Grid Management" defaultOpen={false}>
+              <Field label="Market segment"          value={conn.market_segment} />
+              <Field label="Telemetry"               value={conn.telemetry} />
+              <Field label="Characteristic"          value={conn.characteristic} />
+              <Field label="Connection value"        value={conn.connection_value} />
+              <Field label="Profile category"        value={conn.profile_category} />
+              <Field label="Grid operator"           value={conn.grid_operator} />
+              <Field label="Connection start"        value={conn.connection_start} />
+            </Section>
+
+            <Section title="Supplier" defaultOpen={false}>
+              <Field label="Vacancy"                 value={conn.vacancy ? 'Yes' : 'No'} />
+              <Field label="Status"                  value={conn.status} />
+              <Field label="Active on"               value={conn.active_on} />
+              <Field label="Supplier"                value={conn.supplier} />
+              <Field label="Supplier contract"       value={conn.supplier_contract} />
+            </Section>
+
+            <Section title="Consumption" defaultOpen={false}>
+              <Field label={`Low (standard, ${unit}/yr)`}    value={conn.usage_low   > 0 ? conn.usage_low.toLocaleString()   : '—'} />
+              <Field label={`Normal (standard, ${unit}/yr)`} value={conn.usage_normal > 0 ? conn.usage_normal.toLocaleString() : '—'} />
+              <Field label={`Target usage (${unit}/yr)`}     value={conn.target_usage > 0 ? conn.target_usage.toLocaleString() : '—'} />
+            </Section>
+
+            <Section title="Monitoring" defaultOpen={false}>
+              <Field label="Monitoring type"         value={conn.monitoring_type} />
+              <Field label="Monitoring start"        value={conn.monitoring_start} />
+              <Field label="Available data"          value={conn.data_available} />
+              <Field label="Measurement company"     value={conn.measurement_company} />
+            </Section>
+
+            <Section title="Financial" defaultOpen={false}>
+              <Field label="Tax cluster"             value={conn.tax_cluster_label} />
+              <Field label="Cost center"             value={conn.cost_center} />
+              <Field label="Rubricering"             value={conn.rubricering} />
+              <Field label="Costs"                   value={conn.costs} />
+            </Section>
+
+            <Section title="Comments" defaultOpen={false}>
+              {conn.remarks
+                ? <p className="text-[11px] text-white/60 leading-relaxed">{conn.remarks}</p>
+                : <p className="text-[11px] text-white/25 italic">No comments.</p>
+              }
+            </Section>
+
+          </div>
+
+          {/* Right column — charts & data */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+
+            {/* Contract capacity log */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Activity size={13} className="text-accent" />
+                <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Contract Capacity Log</h3>
+              </div>
+              <div className="card p-0 overflow-hidden">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b border-border-subtle">
+                      {['Effective', 'Value', 'Previous', 'Changed by', 'Changed on'].map(h => (
+                        <th key={h} className="tbl-th text-[10px]">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {capacityLog.map((r, i) => (
+                      <tr key={i} className="border-b border-border-subtle hover:bg-bg-card/50">
+                        <td className="tbl-td font-mono text-white/60">{r.date}</td>
+                        <td className="tbl-td text-accent-hover font-semibold">{r.value}</td>
+                        <td className="tbl-td text-white/40">{r.old}</td>
+                        <td className="tbl-td text-white/60">{r.by}</td>
+                        <td className="tbl-td font-mono text-white/40">{r.on}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* 12-month consumption chart */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Activity size={13} className="text-accent" />
+                <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">
+                  Consumption Last 12 Months ({unit})
+                </h3>
+              </div>
+              <div className="card p-3">
+                <ResponsiveContainer width="100%" height={190}>
+                  <BarChart data={chartData} barGap={2} barCategoryGap="25%">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1a3d47" vertical={false} />
+                    <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#6b8fa3' }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: '#6b8fa3' }} axisLine={false} tickLine={false}
+                      tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                    <Tooltip
+                      contentStyle={{ background: '#0d2b35', border: '1px solid #1a5568', borderRadius: 8, fontSize: 11 }}
+                      formatter={(v: number, n: string) => [v.toLocaleString() + ' ' + unit, n]}
+                    />
+                    <Legend iconType="square" iconSize={8} wrapperStyle={{ fontSize: 10, paddingTop: 4 }} />
+                    <Bar dataKey="target" name="Target" fill={color} opacity={0.25} radius={[2,2,0,0]} />
+                    <Bar dataKey="actual" name="Actual" fill={color} opacity={0.85} radius={[2,2,0,0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-2 flex-wrap">
+              {[
+                { icon: Download, label: 'Fetch Meter Data', primary: true },
+                { icon: Activity, label: 'Energy Analysis' },
+                { icon: ExternalLink, label: 'e-DataPortal' },
+              ].map(({ icon: Icon, label, primary }) => (
+                <button key={label}
+                  className={clsx(
+                    'flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg transition-colors',
+                    primary
+                      ? 'bg-accent hover:bg-accent-hover text-white'
+                      : 'border border-border-default text-white/60 hover:text-white hover:border-white/40'
+                  )}>
+                  <Icon size={12} /> {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Files */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <FileText size={13} className="text-accent" />
+                <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Files</h3>
+              </div>
+              <div className="card px-4 py-3">
+                <p className="text-[11px] text-white/30 italic">No files attached to this connection.</p>
+              </div>
+            </div>
+
+            {/* GPS Map */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <MapPin size={13} className="text-accent" />
+                <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Location</h3>
+                <span className="text-[10px] text-white/35 ml-auto font-mono">{conn.gps}</span>
+              </div>
+              <MiniMap lat={conn.latitude} lon={conn.longitude} color={color} />
+            </div>
+
+            {/* Status log */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle size={13} className="text-accent" />
+                <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Status Log</h3>
+              </div>
+              <div className="card p-0 overflow-hidden">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b border-border-subtle">
+                      {['Date', 'Status', 'Supplier', 'Changed by'].map(h => (
+                        <th key={h} className="tbl-th text-[10px]">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statusLog.map((r, i) => (
+                      <tr key={i} className="border-b border-border-subtle hover:bg-bg-card/50">
+                        <td className="tbl-td font-mono text-white/60">{r.date}</td>
+                        <td className="tbl-td">
+                          <span className={clsx(
+                            'text-[10px] px-2 py-0.5 rounded-full font-medium',
+                            r.status === 'Active'   && 'bg-success/15 text-success-light',
+                            r.status === 'Inactive' && 'bg-danger/15 text-danger-light',
+                          )}>
+                            {r.status}
+                          </span>
+                        </td>
+                        <td className="tbl-td text-white/60">{r.supplier}</td>
+                        <td className="tbl-td text-white/50">{r.by}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Energy meters */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Zap size={13} className="text-accent" />
+                <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Energy Meters</h3>
+              </div>
+              <div className="card p-0 overflow-hidden">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b border-border-subtle">
+                      {['Meter number', 'Type', 'Brand', 'Installation date'].map(h => (
+                        <th key={h} className="tbl-th text-[10px]">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="hover:bg-bg-card/50">
+                      <td className="tbl-td font-mono text-white/70 text-[10px]">{conn.meter_number || '—'}</td>
+                      <td className="tbl-td text-white/60">{conn.connection_type}</td>
+                      <td className="tbl-td text-white/50">Landis+Gyr</td>
+                      <td className="tbl-td font-mono text-white/50">{conn.meter_install || '—'}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Meter readings */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <Activity size={13} className="text-accent" />
+                <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Meter Readings</h3>
+              </div>
+              <div className="card p-0 overflow-hidden">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b border-border-subtle">
+                      {['Tariff', `Reading (${unit})`, 'Reading date', 'Source'].map(h => (
+                        <th key={h} className="tbl-th text-[10px]">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {conn.product === 'Electricity' && (
+                      <>
+                        <tr className="border-b border-border-subtle hover:bg-bg-card/50">
+                          <td className="tbl-td text-white/60">Normal</td>
+                          <td className="tbl-td text-white/80 font-semibold">{conn.reading_normal.toLocaleString()}</td>
+                          <td className="tbl-td font-mono text-white/50">{conn.reading_date}</td>
+                          <td className="tbl-td text-white/40">Smart meter</td>
+                        </tr>
+                        <tr className="hover:bg-bg-card/50">
+                          <td className="tbl-td text-white/60">Low</td>
+                          <td className="tbl-td text-white/80 font-semibold">{conn.reading_low.toLocaleString()}</td>
+                          <td className="tbl-td font-mono text-white/50">{conn.reading_date}</td>
+                          <td className="tbl-td text-white/40">Smart meter</td>
+                        </tr>
+                      </>
+                    )}
+                    {conn.product !== 'Electricity' && (
+                      <tr className="hover:bg-bg-card/50">
+                        <td className="tbl-td text-white/60">Total</td>
+                        <td className="tbl-td text-white/80 font-semibold">{conn.reading_normal.toLocaleString()}</td>
+                        <td className="tbl-td font-mono text-white/50">{conn.reading_date}</td>
+                        <td className="tbl-td text-white/40">Smart meter</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Bottom spacer */}
+            <div className="h-4" />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -1,76 +1,592 @@
 // Extended connections dataset for the Connections page
-// Mirrors the layout of the reference screenshot (Aansluitingen)
 
 export interface FullConnection {
-  id: string
-  product: 'Electricity' | 'Gas' | 'Water'
-  client: string
-  department: string
-  name: string          // Naam aansluiting
-  ean_code: string
-  address: string
-  postcode: string
-  city: string
-  cost_center: string
-  status: 'Active' | 'Inactive' | 'Pending'
-  supplier: string
-  grid_operator: string
+  id:                  string
+  product:             'Electricity' | 'Gas' | 'Water'
+  client:              string
+  department:          string
+  name:                string
+  ean_code:            string
+  address:             string
+  street:              string
+  house_number:        string
+  addition:            string
+  postcode:            string
+  city:                string
+  cost_center:         string
+  status:              'Active' | 'Inactive' | 'Pending'
+  supplier:            string
+  grid_operator:       string
   measurement_company: string
-  connection_type: string
-  building: string
-  market_segment: string
-  monitoring: string
-  characteristic: string
-  usage_category: string
-  tax_cluster: string
+  connection_type:     string
+  building:            string
+  market_segment:      string
+  monitoring:          string
+  characteristic:      string
+  usage_category:      string
+  usage_type:          string
+  tax_cluster:         string
+  latitude:            number
+  longitude:           number
+  // Detail fields
+  object_code:         string
+  allocation_type:     string
+  responsible:         string
+  requested_by:        string
+  contact_person:      string
+  invoice_address:     string
+  active_since:        string
+  contract:            string
+  energy_label:        string
+  market_seg_code:     string
+  telemetry:           string
+  connection_value:    string
+  profile_category:    string
+  connection_start:    string
+  vacancy:             boolean
+  active_on:           string
+  supplier_contract:   string
+  usage_low:           number   // kWh/year
+  usage_normal:        number   // kWh/year
+  target_usage:        number
+  monitoring_type:     string
+  monitoring_start:    string
+  data_available:      string
+  tax_cluster_label:   string
+  rubricering:         string
+  costs:               string
+  gps:                 string
+  meter_number:        string
+  meter_install:       string
+  reading_normal:      number
+  reading_low:         number
+  reading_date:        string
+  remarks:             string
 }
 
 const C = 'Masdar City Group'
 
 export const FULL_CONNECTIONS: FullConnection[] = [
-  // ── Electricity ─────────────────────────────────────────────────────────────
-  { id:'conn-001', product:'Electricity', client:C, department:'Real Estate',      name:'Business Bay Main',        ean_code:'971-4-BBY-882100', address:'Sheikh Zayed Rd 12',     postcode:'11211', city:'Dubai',          cost_center:'5801009-38001', status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x250A LV', building:'Tower A', market_segment:'Commercial', monitoring:'Smart', characteristic:'High Voltage', usage_category:'Office',    tax_cluster:'VAT-5' },
-  { id:'conn-002', product:'Electricity', client:C, department:'Pumping Stations', name:'Pump BBY 1116',            ean_code:'971-4-BBY-882116', address:'Al Asayel St 85 116',    postcode:'11211', city:'Dubai',          cost_center:'9620607-782-33', status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x400A LV', building:'Pump House', market_segment:'Industrial', monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping',   tax_cluster:'VAT-5' },
-  { id:'conn-003', product:'Electricity', client:C, department:'Pumping Stations', name:'Pump BBY 1127',            ean_code:'971-4-BBY-882127', address:'Al Asayel St 156 127',   postcode:'11211', city:'Dubai',          cost_center:'9620607-782-33', status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x400A LV', building:'Pump House', market_segment:'Industrial', monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping',   tax_cluster:'VAT-5' },
-  { id:'conn-004', product:'Electricity', client:C, department:'Traffic & Roads',  name:'Camera Interchange 1',     ean_code:'971-4-BBY-946377', address:'Al Khail Rd 54 NST',     postcode:'11311', city:'Dubai',          cost_center:'000966',         status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'1x25A LV',  building:'Street Cabinet', market_segment:'Infrastructure', monitoring:'Smart', characteristic:'Low Load', usage_category:'Lighting',  tax_cluster:'VAT-0' },
-  { id:'conn-005', product:'Electricity', client:C, department:'Pumping Stations', name:'Pump CVK 43',              ean_code:'971-4-BBY-832232', address:'Achterweg 4',            postcode:'11319', city:'Dubai',          cost_center:'9620608-782-33', status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x400A LV', building:'Pump Station', market_segment:'Industrial', monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping',   tax_cluster:'VAT-5' },
-  { id:'conn-006', product:'Electricity', client:C, department:'Construction',     name:'Fountain Admiraal',        ean_code:'971-4-DIF-316453', address:'Admiraal Pl 158 Nabij',  postcode:'11317', city:'Dubai',          cost_center:'60544401',       status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'1x63A LV',  building:'Public Space', market_segment:'Municipality', monitoring:'Basic', characteristic:'Standard', usage_category:'Water Feature', tax_cluster:'VAT-5' },
-  { id:'conn-007', product:'Electricity', client:C, department:'Traffic & Roads',  name:'VRI Interchange North',    ean_code:'971-4-DIF-406659', address:'Admiraal Pl 158 Thv-vri',postcode:'11317', city:'Dubai',          cost_center:'P-30156870',     status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'1x35A LV',  building:'Street Cabinet', market_segment:'Infrastructure', monitoring:'Smart', characteristic:'Low Load', usage_category:'Traffic',   tax_cluster:'VAT-0' },
-  { id:'conn-008', product:'Electricity', client:C, department:'Real Estate',      name:'Community Centre BBY',     ean_code:'971-4-BBY-362081', address:'Business Bay Sq 412',    postcode:'11317', city:'Dubai',          cost_center:'P-85001250',     status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x160A LV', building:'Community Hall', market_segment:'Commercial', monitoring:'Smart', characteristic:'Standard', usage_category:'Community', tax_cluster:'VAT-5' },
-  { id:'conn-009', product:'Electricity', client:C, department:'Pumping Stations', name:'Pump 1015',                ean_code:'971-4-DIF-149804', address:'Ampere St 5 15-edison',  postcode:'11316', city:'Dubai',          cost_center:'9620606-782-33', status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x250A LV', building:'Pump House', market_segment:'Industrial', monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping',   tax_cluster:'VAT-5' },
-  { id:'conn-010', product:'Electricity', client:C, department:'Pumping Stations', name:'Pump 1001 RG Amstel',      ean_code:'971-4-DIF-152491', address:'Amstelwijckweg 0 A',     postcode:'11316', city:'Dubai',          cost_center:'9620606-782-33', status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x250A LV', building:'Pump House', market_segment:'Industrial', monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping',   tax_cluster:'VAT-5' },
-  { id:'conn-011', product:'Electricity', client:C, department:'Pumping Stations', name:'Pump CVK 50',              ean_code:'971-4-DIF-152477', address:'Amstelwijkweg 1 Nabij',  postcode:'11316', city:'Dubai',          cost_center:'9620608-782-33', status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x250A LV', building:'Pump House', market_segment:'Industrial', monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping',   tax_cluster:'VAT-5' },
-  { id:'conn-012', product:'Electricity', client:C, department:'Real Estate',      name:'DIFC Tower Main',          ean_code:'971-4-DIF-882200', address:'Gate Ave DIFC',          postcode:'50001', city:'Dubai',          cost_center:'DIFC-0012',      status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x400A LV', building:'Office Tower', market_segment:'Commercial', monitoring:'Smart', characteristic:'High Voltage', usage_category:'Office',    tax_cluster:'VAT-5' },
-  { id:'conn-013', product:'Electricity', client:C, department:'Real Estate',      name:'Masdar HQ Main',           ean_code:'971-2-MAS-904100', address:'Masdar City Central',    postcode:'00000', city:'Abu Dhabi',      cost_center:'MAS-9041',       status:'Active',  supplier:'ADC',   grid_operator:'ADC',   measurement_company:'ADC Metering',   connection_type:'3x630A MV', building:'HQ Building', market_segment:'Commercial', monitoring:'Smart', characteristic:'High Voltage', usage_category:'Office',    tax_cluster:'VAT-5' },
-  { id:'conn-014', product:'Electricity', client:C, department:'Operations',       name:'Masdar Innovation Hub',    ean_code:'971-2-MAS-904200', address:'Masdar City Blk B',      postcode:'00000', city:'Abu Dhabi',      cost_center:'MAS-9042',       status:'Active',  supplier:'ADC',   grid_operator:'ADC',   measurement_company:'ADC Metering',   connection_type:'3x400A LV', building:'Innovation Hub', market_segment:'R&D', monitoring:'Smart', characteristic:'Standard', usage_category:'Laboratory', tax_cluster:'VAT-5' },
-  { id:'conn-015', product:'Electricity', client:C, department:'Real Estate',      name:'Sharjah Industrial Zone',  ean_code:'971-6-SHA-771000', address:'Al Sajaa Industrial',    postcode:'00000', city:'Sharjah',        cost_center:'SHA-7710',       status:'Pending', supplier:'SEWA',  grid_operator:'SEWA',  measurement_company:'SEWA Metering',  connection_type:'3x160A LV', building:'Warehouse', market_segment:'Industrial', monitoring:'Traditional', characteristic:'Standard', usage_category:'Warehouse', tax_cluster:'VAT-5' },
-  { id:'conn-016', product:'Electricity', client:C, department:'Real Estate',      name:'RAK Free Zone Unit A',     ean_code:'971-7-RAK-331100', address:'RAK FZ Phase 1',         postcode:'00000', city:'Ras Al Khaimah', cost_center:'RAK-7711',       status:'Active',  supplier:'FEWA',  grid_operator:'FEWA',  measurement_company:'FEWA Metering',  connection_type:'3x250A LV', building:'Factory A', market_segment:'Industrial', monitoring:'Traditional', characteristic:'Standard', usage_category:'Manufacturing', tax_cluster:'VAT-5' },
-  { id:'conn-017', product:'Electricity', client:C, department:'Real Estate',      name:'Al Reem Island Main',      ean_code:'971-2-REM-210100', address:'Al Reem Island Blvd',    postcode:'00000', city:'Abu Dhabi',      cost_center:'REM-2101',       status:'Active',  supplier:'ADC',   grid_operator:'ADC',   measurement_company:'ADC Metering',   connection_type:'3x160A LV', building:'Residential', market_segment:'Residential', monitoring:'Smart', characteristic:'Standard', usage_category:'Residential', tax_cluster:'VAT-5' },
-  { id:'conn-018', product:'Electricity', client:C, department:'Traffic & Roads',  name:'Streetlighting Zone 4',    ean_code:'971-4-BBY-550044', address:'Business Bay Corniche',  postcode:'11211', city:'Dubai',          cost_center:'000-STL-04',     status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'1x63A LV',  building:'Street Cabinet', market_segment:'Infrastructure', monitoring:'Basic', characteristic:'Low Load', usage_category:'Lighting',  tax_cluster:'VAT-0' },
-  { id:'conn-019', product:'Electricity', client:C, department:'Pumping Stations', name:'Sewage Pump North',        ean_code:'971-4-BBY-993001', address:'Al Khail Rd North',      postcode:'11211', city:'Dubai',          cost_center:'SWG-9930',       status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x160A LV', building:'Pump House', market_segment:'Utility', monitoring:'Smart', characteristic:'Standard', usage_category:'Sewage',    tax_cluster:'VAT-5' },
-  { id:'conn-020', product:'Electricity', client:C, department:'Operations',       name:'Data Centre UPS Feed',     ean_code:'971-4-DIF-770100', address:'DIFC Gate Village 3',    postcode:'50001', city:'Dubai',          cost_center:'DC-7701',        status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'3x630A MV', building:'Data Centre', market_segment:'Commercial', monitoring:'Smart', characteristic:'Critical', usage_category:'Data Centre', tax_cluster:'VAT-5' },
-  // ── Gas ─────────────────────────────────────────────────────────────────────
-  { id:'conn-021', product:'Gas',         client:C, department:'Real Estate',      name:'Masdar City Gas Supply',   ean_code:'971-2-MAS-904110', address:'Masdar City Central',    postcode:'00000', city:'Abu Dhabi',      cost_center:'MAS-GAS-01',     status:'Active',  supplier:'ADNOC', grid_operator:'ADNOC', measurement_company:'ADC Metering',   connection_type:'G100',      building:'HQ Building', market_segment:'Commercial', monitoring:'Smart', characteristic:'Standard', usage_category:'Heating',   tax_cluster:'VAT-5' },
-  { id:'conn-022', product:'Gas',         client:C, department:'Operations',       name:'Industrial Gas RAK',       ean_code:'971-7-RAK-GAS-01', address:'RAK FZ Industrial',      postcode:'00000', city:'Ras Al Khaimah', cost_center:'RAK-GAS-01',     status:'Active',  supplier:'FEWA',  grid_operator:'FEWA',  measurement_company:'FEWA Metering',  connection_type:'G250',      building:'Factory A', market_segment:'Industrial', monitoring:'Smart', characteristic:'High Pressure', usage_category:'Process',   tax_cluster:'VAT-5' },
-  { id:'conn-023', product:'Gas',         client:C, department:'Real Estate',      name:'DIFC Kitchen Gas',         ean_code:'971-4-DIF-GAS-01', address:'Gate Ave DIFC',          postcode:'50001', city:'Dubai',          cost_center:'DIFC-GAS-01',    status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'G16',       building:'F&B Level', market_segment:'Commercial', monitoring:'Smart', characteristic:'Standard', usage_category:'Catering',  tax_cluster:'VAT-5' },
-  { id:'conn-024', product:'Gas',         client:C, department:'Facilities',       name:'BBY Heating Plant',        ean_code:'971-4-BBY-GAS-01', address:'Business Bay Basement',  postcode:'11211', city:'Dubai',          cost_center:'FAC-GAS-01',     status:'Inactive',supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'G25',       building:'Basement Plant', market_segment:'Commercial', monitoring:'Basic', characteristic:'Standard', usage_category:'Heating',   tax_cluster:'VAT-5' },
-  // ── Water ────────────────────────────────────────────────────────────────────
-  { id:'conn-025', product:'Water',       client:C, department:'Real Estate',      name:'Project Crown Water',      ean_code:'123000000001000150', address:'Spuiboulevard 314',    postcode:'11311', city:'Dubai',          cost_center:'5801009-38005',  status:'Active',  supplier:'DEWA',  grid_operator:'DEWA',  measurement_company:'DEWA Metering',  connection_type:'DN50',      building:'Crown Tower', market_segment:'Commercial', monitoring:'Smart', characteristic:'Standard', usage_category:'Domestic',  tax_cluster:'VAT-0' },
-  { id:'conn-026', product:'Water',       client:C, department:'Facilities',       name:'Masdar Irrigation Main',   ean_code:'971-2-MAS-WAT-01',  address:'Masdar City Gardens',  postcode:'00000', city:'Abu Dhabi',      cost_center:'MAS-WAT-01',     status:'Active',  supplier:'ADC',   grid_operator:'ADC',   measurement_company:'ADC Metering',   connection_type:'DN100',     building:'Landscaping', market_segment:'Commercial', monitoring:'Smart', characteristic:'Standard', usage_category:'Irrigation', tax_cluster:'VAT-0' },
+  {
+    id:'conn-001', product:'Electricity', client:C, department:'Real Estate',
+    name:'Business Bay Main', ean_code:'971-4-BBY-882100',
+    address:'Sheikh Zayed Rd 12', street:'Sheikh Zayed Rd', house_number:'12', addition:'',
+    postcode:'11211', city:'Dubai', cost_center:'5801009-38001', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'3x250A LV', building:'Tower A', market_segment:'Commercial',
+    monitoring:'Smart', characteristic:'High Voltage', usage_category:'Office', usage_type:'Standard',
+    tax_cluster:'VAT-5', latitude:25.1865, longitude:55.2632,
+    object_code:'000966-001', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'PO Box 12, 11211 Dubai',
+    active_since:'01-01-2022', contract:'DEWA Commercial 2022',
+    energy_label:'A', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'3x250A', profile_category:'E2B', connection_start:'01-03-2022',
+    vacancy:false, active_on:'01-01-2022', supplier_contract:'DEWA Std Commercial',
+    usage_low:62400, usage_normal:126000, target_usage:188400,
+    monitoring_type:'Detail consumption', monitoring_start:'01-01-2022', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Commercial (VAT 5%)', rubricering:'263749 Office - Debtor Office',
+    costs:'Own contract', gps:'25.18647, 55.26320',
+    meter_number:'E0079000036100001', meter_install:'01-03-2022',
+    reading_normal:126000, reading_low:62400, reading_date:'01-06-2026',
+    remarks:'Primary feed for Tower A ground floor.',
+  },
+  {
+    id:'conn-002', product:'Electricity', client:C, department:'Pumping Stations',
+    name:'Pump BBY 1116', ean_code:'971-4-BBY-882116',
+    address:'Al Asayel St 85 116', street:'Al Asayel St', house_number:'85', addition:'116-lamel',
+    postcode:'11211', city:'Dubai', cost_center:'9620607-782-33', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'3x400A LV', building:'Pump House', market_segment:'Industrial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping', usage_type:'Motor load',
+    tax_cluster:'VAT-5', latitude:25.190, longitude:55.270,
+    object_code:'000966-361', allocation_type:'Primary', responsible:'Ed Schindler', requested_by:'Ed Doorn',
+    contact_person:'Wim van Loon', invoice_address:'Postbus 8, 3300 AA Dordrecht',
+    active_since:'01-01-2024', contract:'HVC Elektra',
+    energy_label:'B', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'3x35', profile_category:'E2B', connection_start:'01-01-2010',
+    vacancy:false, active_on:'01-01-2024', supplier_contract:'HVC Elektra',
+    usage_low:633, usage_normal:727, target_usage:1360,
+    monitoring_type:'Detail consumption', monitoring_start:'01-01-2010', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Schoonwater (Riool)', rubricering:'263749 pompen - Debiteur Pompe',
+    costs:'Own contract', gps:'25.19000, 55.27000',
+    meter_number:'E0079000036158924', meter_install:'01-05-2026',
+    reading_normal:190, reading_low:259, reading_date:'01-06-2026',
+    remarks:'Geen centrale persleiding (schoonwater).',
+  },
+  {
+    id:'conn-003', product:'Electricity', client:C, department:'Pumping Stations',
+    name:'Pump BBY 1127', ean_code:'971-4-BBY-882127',
+    address:'Al Asayel St 156 127', street:'Al Asayel St', house_number:'156', addition:'127-grond',
+    postcode:'11211', city:'Dubai', cost_center:'9620607-782-33', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'3x400A LV', building:'Pump House', market_segment:'Industrial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping', usage_type:'Motor load',
+    tax_cluster:'VAT-5', latitude:25.192, longitude:55.268,
+    object_code:'000966-362', allocation_type:'Primary', responsible:'Ed Schindler', requested_by:'Ed Doorn',
+    contact_person:'Wim van Loon', invoice_address:'Postbus 8, 3300 AA Dordrecht',
+    active_since:'01-01-2024', contract:'HVC Elektra',
+    energy_label:'B', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'3x35', profile_category:'E2B', connection_start:'01-01-2010',
+    vacancy:false, active_on:'01-01-2024', supplier_contract:'HVC Elektra',
+    usage_low:580, usage_normal:690, target_usage:1270,
+    monitoring_type:'Detail consumption', monitoring_start:'01-01-2010', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Schoonwater (Riool)', rubricering:'263749 pompen - Debiteur Pompe',
+    costs:'Own contract', gps:'25.19200, 55.26800',
+    meter_number:'E0079000036158925', meter_install:'01-05-2026',
+    reading_normal:175, reading_low:241, reading_date:'01-06-2026',
+    remarks:'',
+  },
+  {
+    id:'conn-004', product:'Electricity', client:C, department:'Traffic & Roads',
+    name:'Camera Interchange 1', ean_code:'971-4-BBY-946377',
+    address:'Al Khail Rd 54 NST', street:'Al Khail Rd', house_number:'54', addition:'NST',
+    postcode:'11311', city:'Dubai', cost_center:'000966', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'1x25A LV', building:'Street Cabinet', market_segment:'Infrastructure',
+    monitoring:'Smart', characteristic:'Low Load', usage_category:'Lighting', usage_type:'Street',
+    tax_cluster:'VAT-0', latitude:25.180, longitude:55.260,
+    object_code:'000966-400', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'PO Box 12, 11211 Dubai',
+    active_since:'01-06-2020', contract:'DEWA Municipal',
+    energy_label:'C', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'1x25A', profile_category:'E1A', connection_start:'01-06-2020',
+    vacancy:false, active_on:'01-06-2020', supplier_contract:'DEWA Std Municipal',
+    usage_low:0, usage_normal:2400, target_usage:2400,
+    monitoring_type:'Smart', monitoring_start:'01-06-2020', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Public Infrastructure (VAT 0%)', rubricering:'Traffic - Municipal',
+    costs:'Municipal contract', gps:'25.18000, 55.26000',
+    meter_number:'E0079000036158926', meter_install:'01-06-2020',
+    reading_normal:2400, reading_low:0, reading_date:'01-06-2026',
+    remarks:'CCTV camera junction Al Khail.',
+  },
+  {
+    id:'conn-005', product:'Electricity', client:C, department:'Pumping Stations',
+    name:'Pump CVK 43', ean_code:'971-4-BBY-832232',
+    address:'Achterweg 4', street:'Achterweg', house_number:'4', addition:'',
+    postcode:'11319', city:'Dubai', cost_center:'9620608-782-33', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'3x400A LV', building:'Pump Station', market_segment:'Industrial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping', usage_type:'Motor load',
+    tax_cluster:'VAT-5', latitude:25.185, longitude:55.272,
+    object_code:'000966-363', allocation_type:'Primary', responsible:'Ed Schindler', requested_by:'Ed Doorn',
+    contact_person:'Wim van Loon', invoice_address:'Postbus 8, 11319 Dubai',
+    active_since:'01-01-2019', contract:'HVC Elektra',
+    energy_label:'B', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'3x35', profile_category:'E2B', connection_start:'01-01-2010',
+    vacancy:false, active_on:'01-01-2019', supplier_contract:'HVC Elektra',
+    usage_low:700, usage_normal:800, target_usage:1500,
+    monitoring_type:'Detail consumption', monitoring_start:'01-01-2010', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Schoonwater (Riool)', rubricering:'263749 pompen - Debiteur Pompe',
+    costs:'Own contract', gps:'25.18500, 55.27200',
+    meter_number:'E0079000036158927', meter_install:'01-05-2019',
+    reading_normal:200, reading_low:280, reading_date:'01-06-2026',
+    remarks:'CVK pump station Achterweg.',
+  },
+  {
+    id:'conn-006', product:'Electricity', client:C, department:'Construction',
+    name:'Fountain Admiraal', ean_code:'971-4-DIF-316453',
+    address:'Admiraal Pl 158 Nabij', street:'Admiraal Pl', house_number:'158', addition:'Nabij',
+    postcode:'11317', city:'Dubai', cost_center:'60544401', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'1x63A LV', building:'Public Space', market_segment:'Municipality',
+    monitoring:'Basic', characteristic:'Standard', usage_category:'Water Feature', usage_type:'Feature',
+    tax_cluster:'VAT-5', latitude:25.200, longitude:55.265,
+    object_code:'000966-500', allocation_type:'Secondary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'PO Box 12, 11317 Dubai',
+    active_since:'01-03-2021', contract:'DEWA Commercial 2021',
+    energy_label:'C', market_seg_code:'KV', telemetry:'No',
+    connection_value:'1x63A', profile_category:'E1B', connection_start:'01-03-2021',
+    vacancy:false, active_on:'01-03-2021', supplier_contract:'DEWA Std Commercial',
+    usage_low:0, usage_normal:4200, target_usage:4200,
+    monitoring_type:'Basic', monitoring_start:'01-03-2021', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Public (VAT 5%)', rubricering:'Public space - Fountain',
+    costs:'Own contract', gps:'25.20000, 55.26500',
+    meter_number:'E0079000036158928', meter_install:'01-03-2021',
+    reading_normal:4200, reading_low:0, reading_date:'01-06-2026',
+    remarks:'Decorative fountain near Admiraal Square.',
+  },
+  {
+    id:'conn-007', product:'Electricity', client:C, department:'Traffic & Roads',
+    name:'VRI Interchange North', ean_code:'971-4-DIF-406659',
+    address:'Admiraal Pl 158 Thv-vri', street:'Admiraal Pl', house_number:'158', addition:'Thv-vri',
+    postcode:'11317', city:'Dubai', cost_center:'P-30156870', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'1x35A LV', building:'Street Cabinet', market_segment:'Infrastructure',
+    monitoring:'Smart', characteristic:'Low Load', usage_category:'Traffic', usage_type:'Signals',
+    tax_cluster:'VAT-0', latitude:25.202, longitude:55.264,
+    object_code:'000966-401', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'PO Box 12, 11317 Dubai',
+    active_since:'01-01-2019', contract:'DEWA Municipal',
+    energy_label:'C', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'1x35A', profile_category:'E1A', connection_start:'01-01-2019',
+    vacancy:false, active_on:'01-01-2019', supplier_contract:'DEWA Municipal',
+    usage_low:0, usage_normal:3100, target_usage:3100,
+    monitoring_type:'Smart', monitoring_start:'01-01-2019', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Public Infrastructure (VAT 0%)', rubricering:'Traffic VRI - Municipal',
+    costs:'Municipal contract', gps:'25.20200, 55.26400',
+    meter_number:'E0079000036158929', meter_install:'01-01-2019',
+    reading_normal:3100, reading_low:0, reading_date:'01-06-2026',
+    remarks:'Traffic light junction north side.',
+  },
+  {
+    id:'conn-008', product:'Electricity', client:C, department:'Real Estate',
+    name:'Community Centre BBY', ean_code:'971-4-BBY-362081',
+    address:'Business Bay Sq 412', street:'Business Bay Sq', house_number:'412', addition:'',
+    postcode:'11317', city:'Dubai', cost_center:'P-85001250', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'3x160A LV', building:'Community Hall', market_segment:'Commercial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Community', usage_type:'Retail',
+    tax_cluster:'VAT-5', latitude:25.188, longitude:55.275,
+    object_code:'000966-200', allocation_type:'Primary', responsible:'Sara Khalid', requested_by:'Ahmad Al-Hassan',
+    contact_person:'Wim van Loon', invoice_address:'PO Box 12, 11317 Dubai',
+    active_since:'01-05-2020', contract:'DEWA Commercial 2020',
+    energy_label:'B', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'3x160A', profile_category:'E2B', connection_start:'01-05-2020',
+    vacancy:false, active_on:'01-05-2020', supplier_contract:'DEWA Std Commercial',
+    usage_low:14000, usage_normal:34000, target_usage:48000,
+    monitoring_type:'Detail consumption', monitoring_start:'01-05-2020', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Commercial (VAT 5%)', rubricering:'Community - Debiteur',
+    costs:'Own contract', gps:'25.18800, 55.27500',
+    meter_number:'E0079000036158930', meter_install:'01-05-2020',
+    reading_normal:34000, reading_low:14000, reading_date:'01-06-2026',
+    remarks:'Business Bay community hall and retail.',
+  },
+  {
+    id:'conn-009', product:'Electricity', client:C, department:'Pumping Stations',
+    name:'Pump 1015', ean_code:'971-4-DIF-149804',
+    address:'Ampere St 5 15-edison', street:'Ampere St', house_number:'5', addition:'15-edison',
+    postcode:'11316', city:'Dubai', cost_center:'9620606-782-33', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'3x250A LV', building:'Pump House', market_segment:'Industrial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping', usage_type:'Motor load',
+    tax_cluster:'VAT-5', latitude:25.205, longitude:55.268,
+    object_code:'000966-364', allocation_type:'Primary', responsible:'Ed Schindler', requested_by:'Ed Doorn',
+    contact_person:'Wim van Loon', invoice_address:'Postbus 8, 11316 Dubai',
+    active_since:'01-01-2018', contract:'HVC Elektra',
+    energy_label:'B', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'3x35', profile_category:'E2B', connection_start:'01-01-2010',
+    vacancy:false, active_on:'01-01-2018', supplier_contract:'HVC Elektra',
+    usage_low:680, usage_normal:760, target_usage:1440,
+    monitoring_type:'Detail consumption', monitoring_start:'01-01-2010', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Schoonwater (Riool)', rubricering:'263749 pompen - Debiteur Pompe',
+    costs:'Own contract', gps:'25.20500, 55.26800',
+    meter_number:'E0079000036158931', meter_install:'01-05-2018',
+    reading_normal:190, reading_low:240, reading_date:'01-06-2026',
+    remarks:'',
+  },
+  {
+    id:'conn-010', product:'Electricity', client:C, department:'Pumping Stations',
+    name:'Pump 1001 RG Amstel', ean_code:'971-4-DIF-152491',
+    address:'Amstelwijckweg 0 A', street:'Amstelwijckweg', house_number:'0', addition:'A',
+    postcode:'11316', city:'Dubai', cost_center:'9620606-782-33', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'3x250A LV', building:'Pump House', market_segment:'Industrial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping', usage_type:'Motor load',
+    tax_cluster:'VAT-5', latitude:25.207, longitude:55.270,
+    object_code:'000966-365', allocation_type:'Primary', responsible:'Ed Schindler', requested_by:'Ed Doorn',
+    contact_person:'Wim van Loon', invoice_address:'Postbus 8, 11316 Dubai',
+    active_since:'01-01-2018', contract:'HVC Elektra',
+    energy_label:'B', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'3x35', profile_category:'E2B', connection_start:'01-01-2010',
+    vacancy:false, active_on:'01-01-2018', supplier_contract:'HVC Elektra',
+    usage_low:620, usage_normal:720, target_usage:1340,
+    monitoring_type:'Detail consumption', monitoring_start:'01-01-2010', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Schoonwater (Riool)', rubricering:'263749 pompen - Debiteur Pompe',
+    costs:'Own contract', gps:'25.20700, 55.27000',
+    meter_number:'E0079000036158932', meter_install:'01-05-2018',
+    reading_normal:180, reading_low:230, reading_date:'01-06-2026',
+    remarks:'',
+  },
+  {
+    id:'conn-011', product:'Electricity', client:C, department:'Pumping Stations',
+    name:'Pump CVK 50', ean_code:'971-4-DIF-152477',
+    address:'Amstelwijkweg 1 Nabij', street:'Amstelwijkweg', house_number:'1', addition:'Nabij',
+    postcode:'11316', city:'Dubai', cost_center:'9620608-782-33', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'3x250A LV', building:'Pump House', market_segment:'Industrial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Pumping', usage_type:'Motor load',
+    tax_cluster:'VAT-5', latitude:25.209, longitude:55.272,
+    object_code:'000966-366', allocation_type:'Primary', responsible:'Ed Schindler', requested_by:'Ed Doorn',
+    contact_person:'Wim van Loon', invoice_address:'Postbus 8, 11316 Dubai',
+    active_since:'01-01-2018', contract:'HVC Elektra',
+    energy_label:'B', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'3x35', profile_category:'E2B', connection_start:'01-01-2010',
+    vacancy:false, active_on:'01-01-2018', supplier_contract:'HVC Elektra',
+    usage_low:590, usage_normal:680, target_usage:1270,
+    monitoring_type:'Detail consumption', monitoring_start:'01-01-2010', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Schoonwater (Riool)', rubricering:'263749 pompen - Debiteur Pompe',
+    costs:'Own contract', gps:'25.20900, 55.27200',
+    meter_number:'E0079000036158933', meter_install:'01-05-2018',
+    reading_normal:170, reading_low:220, reading_date:'01-06-2026',
+    remarks:'',
+  },
+  {
+    id:'conn-012', product:'Electricity', client:C, department:'Real Estate',
+    name:'DIFC Tower Main', ean_code:'971-4-DIF-882200',
+    address:'Gate Ave DIFC', street:'Gate Ave', house_number:'1', addition:'DIFC',
+    postcode:'50001', city:'Dubai', cost_center:'DIFC-0012', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'3x400A LV', building:'Office Tower', market_segment:'Commercial',
+    monitoring:'Smart', characteristic:'High Voltage', usage_category:'Office', usage_type:'Standard',
+    tax_cluster:'VAT-5', latitude:25.2048, longitude:55.2708,
+    object_code:'000966-100', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'Gate Ave DIFC, 50001 Dubai',
+    active_since:'01-11-2021', contract:'DEWA Premium Commercial',
+    energy_label:'A', market_seg_code:'KV', telemetry:'Yes',
+    connection_value:'3x400A', profile_category:'E3A', connection_start:'01-11-2021',
+    vacancy:false, active_on:'01-11-2021', supplier_contract:'DEWA Premium Commercial',
+    usage_low:78000, usage_normal:157800, target_usage:235800,
+    monitoring_type:'Detail consumption', monitoring_start:'01-11-2021', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Commercial (VAT 5%)', rubricering:'Office Tower - Debiteur',
+    costs:'Own contract', gps:'25.20480, 55.27080',
+    meter_number:'E0079000036158934', meter_install:'01-11-2021',
+    reading_normal:38720, reading_low:12400, reading_date:'01-06-2026',
+    remarks:'Invoice anomaly detected May 2025 (+24.1% vs expected).',
+  },
+  {
+    id:'conn-013', product:'Electricity', client:C, department:'Real Estate',
+    name:'Masdar HQ Main', ean_code:'971-2-MAS-904100',
+    address:'Masdar City Central', street:'Masdar City Central', house_number:'1', addition:'',
+    postcode:'00000', city:'Abu Dhabi', cost_center:'MAS-9041', status:'Active',
+    supplier:'ADC', grid_operator:'ADC', measurement_company:'ADC Metering',
+    connection_type:'3x630A MV', building:'HQ Building', market_segment:'Commercial',
+    monitoring:'Smart', characteristic:'High Voltage', usage_category:'Office', usage_type:'Standard',
+    tax_cluster:'VAT-5', latitude:24.4267, longitude:54.6183,
+    object_code:'MAS-001', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'Masdar City, Abu Dhabi',
+    active_since:'01-01-2023', contract:'ADC Premium 2023',
+    energy_label:'A+', market_seg_code:'HV', telemetry:'Yes',
+    connection_value:'3x630A', profile_category:'E4A', connection_start:'01-01-2023',
+    vacancy:false, active_on:'01-01-2023', supplier_contract:'ADC Premium Renewable',
+    usage_low:102000, usage_normal:210000, target_usage:312000,
+    monitoring_type:'Detail consumption', monitoring_start:'01-01-2023', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Commercial (VAT 5%)', rubricering:'HQ Masdar - Debiteur',
+    costs:'Own contract', gps:'24.42670, 54.61830',
+    meter_number:'E0079000036158935', meter_install:'01-01-2023',
+    reading_normal:51340, reading_low:18200, reading_date:'01-06-2026',
+    remarks:'70% renewable source from Masdar solar farm.',
+  },
+  {
+    id:'conn-014', product:'Electricity', client:C, department:'Operations',
+    name:'Masdar Innovation Hub', ean_code:'971-2-MAS-904200',
+    address:'Masdar City Blk B', street:'Masdar City', house_number:'Blk B', addition:'',
+    postcode:'00000', city:'Abu Dhabi', cost_center:'MAS-9042', status:'Active',
+    supplier:'ADC', grid_operator:'ADC', measurement_company:'ADC Metering',
+    connection_type:'3x400A LV', building:'Innovation Hub', market_segment:'R&D',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Laboratory', usage_type:'R&D',
+    tax_cluster:'VAT-5', latitude:24.428, longitude:54.620,
+    object_code:'MAS-002', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'Masdar City, Abu Dhabi',
+    active_since:'01-01-2023', contract:'ADC Premium 2023',
+    energy_label:'A', market_seg_code:'HV', telemetry:'Yes',
+    connection_value:'3x400A', profile_category:'E3A', connection_start:'01-01-2023',
+    vacancy:false, active_on:'01-01-2023', supplier_contract:'ADC Premium Renewable',
+    usage_low:0, usage_normal:0, target_usage:0,
+    monitoring_type:'Detail consumption', monitoring_start:'01-01-2023', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'R&D (VAT 5%)', rubricering:'Innovation Hub - Debiteur',
+    costs:'Own contract', gps:'24.42800, 54.62000',
+    meter_number:'E0079000036158936', meter_install:'01-01-2023',
+    reading_normal:28000, reading_low:0, reading_date:'01-06-2026',
+    remarks:'',
+  },
+  {
+    id:'conn-015', product:'Electricity', client:C, department:'Real Estate',
+    name:'Sharjah Industrial Zone', ean_code:'971-6-SHA-771000',
+    address:'Al Sajaa Industrial', street:'Al Sajaa', house_number:'1', addition:'',
+    postcode:'00000', city:'Sharjah', cost_center:'SHA-7710', status:'Pending',
+    supplier:'SEWA', grid_operator:'SEWA', measurement_company:'SEWA Metering',
+    connection_type:'3x160A LV', building:'Warehouse', market_segment:'Industrial',
+    monitoring:'Traditional', characteristic:'Standard', usage_category:'Warehouse', usage_type:'Industrial',
+    tax_cluster:'VAT-5', latitude:25.3573, longitude:55.4033,
+    object_code:'SHA-001', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'Al Sajaa, Sharjah',
+    active_since:'—', contract:'SEWA Industrial',
+    energy_label:'C', market_seg_code:'KV', telemetry:'No',
+    connection_value:'3x160A', profile_category:'E2B', connection_start:'—',
+    vacancy:false, active_on:'—', supplier_contract:'SEWA Std Industrial',
+    usage_low:0, usage_normal:84200, target_usage:84200,
+    monitoring_type:'Traditional', monitoring_start:'—', data_available:'Pending installation',
+    tax_cluster_label:'Industrial (VAT 5%)', rubricering:'Warehouse - Debiteur',
+    costs:'Own contract', gps:'25.35730, 55.40330',
+    meter_number:'—', meter_install:'—',
+    reading_normal:0, reading_low:0, reading_date:'—',
+    remarks:'Meter upgrade required by Q2 2026 under FEWA smart meter mandate.',
+  },
+  {
+    id:'conn-016', product:'Electricity', client:C, department:'Real Estate',
+    name:'RAK Free Zone Unit A', ean_code:'971-7-RAK-331100',
+    address:'RAK FZ Phase 1', street:'RAK FZ', house_number:'Phase 1', addition:'',
+    postcode:'00000', city:'Ras Al Khaimah', cost_center:'RAK-7711', status:'Active',
+    supplier:'FEWA', grid_operator:'FEWA', measurement_company:'FEWA Metering',
+    connection_type:'3x250A LV', building:'Factory A', market_segment:'Industrial',
+    monitoring:'Traditional', characteristic:'Standard', usage_category:'Manufacturing', usage_type:'Industrial',
+    tax_cluster:'VAT-5', latitude:25.7953, longitude:55.9763,
+    object_code:'RAK-001', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'RAK FZ, Ras Al Khaimah',
+    active_since:'01-02-2019', contract:'FEWA Industrial',
+    energy_label:'C', market_seg_code:'KV', telemetry:'No',
+    connection_value:'3x250A', profile_category:'E2B', connection_start:'01-02-2019',
+    vacancy:false, active_on:'01-02-2019', supplier_contract:'FEWA Std Industrial',
+    usage_low:32000, usage_normal:65600, target_usage:97600,
+    monitoring_type:'Traditional', monitoring_start:'01-02-2019', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Industrial (VAT 5%)', rubricering:'Factory - Debiteur',
+    costs:'Own contract', gps:'25.79530, 55.97630',
+    meter_number:'E0079000036158937', meter_install:'01-02-2019',
+    reading_normal:31200, reading_low:9800, reading_date:'01-06-2026',
+    remarks:'Traditional meter — upgrade scheduled Q1 2026.',
+  },
+  {
+    id:'conn-021', product:'Gas', client:C, department:'Real Estate',
+    name:'Masdar City Gas Supply', ean_code:'971-2-MAS-904110',
+    address:'Masdar City Central', street:'Masdar City Central', house_number:'1', addition:'',
+    postcode:'00000', city:'Abu Dhabi', cost_center:'MAS-GAS-01', status:'Active',
+    supplier:'ADNOC', grid_operator:'ADNOC', measurement_company:'ADC Metering',
+    connection_type:'G100', building:'HQ Building', market_segment:'Commercial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Heating', usage_type:'Gas heating',
+    tax_cluster:'VAT-5', latitude:24.430, longitude:54.622,
+    object_code:'MAS-GAS-001', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'Masdar City, Abu Dhabi',
+    active_since:'01-01-2023', contract:'ADNOC Gas Commercial',
+    energy_label:'A', market_seg_code:'GAS', telemetry:'Yes',
+    connection_value:'G100', profile_category:'G1A', connection_start:'01-01-2023',
+    vacancy:false, active_on:'01-01-2023', supplier_contract:'ADNOC Gas Commercial',
+    usage_low:0, usage_normal:12840, target_usage:12840,
+    monitoring_type:'Smart', monitoring_start:'01-01-2023', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Commercial Gas (VAT 5%)', rubricering:'Gas - Masdar - Debiteur',
+    costs:'Own contract', gps:'24.43000, 54.62200',
+    meter_number:'G0079000036100001', meter_install:'01-01-2023',
+    reading_normal:12840, reading_low:0, reading_date:'01-06-2026',
+    remarks:'Gas supply for HVAC and kitchen in HQ.',
+  },
+  {
+    id:'conn-022', product:'Gas', client:C, department:'Operations',
+    name:'Industrial Gas RAK', ean_code:'971-7-RAK-GAS-01',
+    address:'RAK FZ Industrial', street:'RAK FZ Industrial', house_number:'2', addition:'',
+    postcode:'00000', city:'Ras Al Khaimah', cost_center:'RAK-GAS-01', status:'Active',
+    supplier:'FEWA', grid_operator:'FEWA', measurement_company:'FEWA Metering',
+    connection_type:'G250', building:'Factory A', market_segment:'Industrial',
+    monitoring:'Smart', characteristic:'High Pressure', usage_category:'Process', usage_type:'Industrial',
+    tax_cluster:'VAT-5', latitude:25.797, longitude:55.978,
+    object_code:'RAK-GAS-001', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'RAK FZ, Ras Al Khaimah',
+    active_since:'01-02-2019', contract:'FEWA Gas Industrial',
+    energy_label:'B', market_seg_code:'GAS', telemetry:'Yes',
+    connection_value:'G250', profile_category:'G2A', connection_start:'01-02-2019',
+    vacancy:false, active_on:'01-02-2019', supplier_contract:'FEWA Gas Industrial',
+    usage_low:0, usage_normal:8400, target_usage:8400,
+    monitoring_type:'Smart', monitoring_start:'01-02-2019', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Industrial Gas (VAT 5%)', rubricering:'Gas - Factory - Debiteur',
+    costs:'Own contract', gps:'25.79700, 55.97800',
+    meter_number:'G0079000036100002', meter_install:'01-02-2019',
+    reading_normal:8400, reading_low:0, reading_date:'01-06-2026',
+    remarks:'High pressure process gas for manufacturing.',
+  },
+  {
+    id:'conn-023', product:'Gas', client:C, department:'Real Estate',
+    name:'DIFC Kitchen Gas', ean_code:'971-4-DIF-GAS-01',
+    address:'Gate Ave DIFC', street:'Gate Ave', house_number:'1', addition:'F&B',
+    postcode:'50001', city:'Dubai', cost_center:'DIFC-GAS-01', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'G16', building:'F&B Level', market_segment:'Commercial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Catering', usage_type:'Kitchen',
+    tax_cluster:'VAT-5', latitude:25.206, longitude:55.272,
+    object_code:'DIFC-GAS-001', allocation_type:'Secondary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'Gate Ave DIFC, 50001 Dubai',
+    active_since:'01-11-2021', contract:'DEWA Gas Commercial',
+    energy_label:'B', market_seg_code:'GAS', telemetry:'Yes',
+    connection_value:'G16', profile_category:'G1A', connection_start:'01-11-2021',
+    vacancy:false, active_on:'01-11-2021', supplier_contract:'DEWA Gas Commercial',
+    usage_low:0, usage_normal:2400, target_usage:2400,
+    monitoring_type:'Smart', monitoring_start:'01-11-2021', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Commercial Gas (VAT 5%)', rubricering:'Gas - F&B - Debiteur',
+    costs:'Own contract', gps:'25.20600, 55.27200',
+    meter_number:'G0079000036100003', meter_install:'01-11-2021',
+    reading_normal:2400, reading_low:0, reading_date:'01-06-2026',
+    remarks:'Restaurant and catering gas supply DIFC.',
+  },
+  {
+    id:'conn-024', product:'Gas', client:C, department:'Facilities',
+    name:'BBY Heating Plant', ean_code:'971-4-BBY-GAS-01',
+    address:'Business Bay Basement', street:'Business Bay', house_number:'1', addition:'Basement',
+    postcode:'11211', city:'Dubai', cost_center:'FAC-GAS-01', status:'Inactive',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'G25', building:'Basement Plant', market_segment:'Commercial',
+    monitoring:'Basic', characteristic:'Standard', usage_category:'Heating', usage_type:'Plant room',
+    tax_cluster:'VAT-5', latitude:25.184, longitude:55.260,
+    object_code:'BBY-GAS-001', allocation_type:'Secondary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'PO Box 12, 11211 Dubai',
+    active_since:'—', contract:'—',
+    energy_label:'D', market_seg_code:'GAS', telemetry:'No',
+    connection_value:'G25', profile_category:'G1A', connection_start:'01-01-2018',
+    vacancy:true, active_on:'—', supplier_contract:'—',
+    usage_low:0, usage_normal:0, target_usage:0,
+    monitoring_type:'Basic', monitoring_start:'01-01-2018', data_available:'No data — inactive',
+    tax_cluster_label:'Commercial Gas (VAT 5%)', rubricering:'Gas - Heating - Debiteur',
+    costs:'—', gps:'25.18400, 55.26000',
+    meter_number:'G0079000036100004', meter_install:'01-01-2018',
+    reading_normal:0, reading_low:0, reading_date:'—',
+    remarks:'Decommissioned — central heating plant shut down 2023.',
+  },
+  {
+    id:'conn-025', product:'Water', client:C, department:'Real Estate',
+    name:'Project Crown Water', ean_code:'123000000001000150',
+    address:'Spuiboulevard 314', street:'Spuiboulevard', house_number:'314', addition:'',
+    postcode:'11311', city:'Dubai', cost_center:'5801009-38005', status:'Active',
+    supplier:'DEWA', grid_operator:'DEWA', measurement_company:'DEWA Metering',
+    connection_type:'DN50', building:'Crown Tower', market_segment:'Commercial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Domestic', usage_type:'Potable',
+    tax_cluster:'VAT-0', latitude:25.183, longitude:55.258,
+    object_code:'CRW-WAT-001', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'Spuiboulevard 314, 11311 Dubai',
+    active_since:'01-01-2024', contract:'DEWA Water Commercial',
+    energy_label:'A', market_seg_code:'WAT', telemetry:'Yes',
+    connection_value:'DN50', profile_category:'W1A', connection_start:'01-01-2024',
+    vacancy:false, active_on:'01-01-2024', supplier_contract:'DEWA Water Commercial',
+    usage_low:0, usage_normal:48000, target_usage:48000,
+    monitoring_type:'Smart', monitoring_start:'01-01-2024', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Domestic Water (VAT 0%)', rubricering:'Water - Crown Tower - Debiteur',
+    costs:'Own contract', gps:'25.18300, 55.25800',
+    meter_number:'W0079000036100001', meter_install:'01-01-2024',
+    reading_normal:48000, reading_low:0, reading_date:'01-06-2026',
+    remarks:'Potable water supply Crown Tower residential.',
+  },
+  {
+    id:'conn-026', product:'Water', client:C, department:'Facilities',
+    name:'Masdar Irrigation Main', ean_code:'971-2-MAS-WAT-01',
+    address:'Masdar City Gardens', street:'Masdar City Gardens', house_number:'1', addition:'',
+    postcode:'00000', city:'Abu Dhabi', cost_center:'MAS-WAT-01', status:'Active',
+    supplier:'ADC', grid_operator:'ADC', measurement_company:'ADC Metering',
+    connection_type:'DN100', building:'Landscaping', market_segment:'Commercial',
+    monitoring:'Smart', characteristic:'Standard', usage_category:'Irrigation', usage_type:'Landscaping',
+    tax_cluster:'VAT-0', latitude:24.432, longitude:54.615,
+    object_code:'MAS-WAT-001', allocation_type:'Primary', responsible:'Ahmad Al-Hassan', requested_by:'Sara Khalid',
+    contact_person:'Wim van Loon', invoice_address:'Masdar City, Abu Dhabi',
+    active_since:'01-01-2023', contract:'ADC Water Commercial',
+    energy_label:'A', market_seg_code:'WAT', telemetry:'Yes',
+    connection_value:'DN100', profile_category:'W2A', connection_start:'01-01-2023',
+    vacancy:false, active_on:'01-01-2023', supplier_contract:'ADC Water Commercial',
+    usage_low:0, usage_normal:36000, target_usage:36000,
+    monitoring_type:'Smart', monitoring_start:'01-01-2023', data_available:'Latest data retrieved until 08-06-2026',
+    tax_cluster_label:'Irrigation Water (VAT 0%)', rubricering:'Water - Irrigation - Debiteur',
+    costs:'Own contract', gps:'24.43200, 54.61500',
+    meter_number:'W0079000036100002', meter_install:'01-01-2023',
+    reading_normal:36000, reading_low:0, reading_date:'01-06-2026',
+    remarks:'Treated water for landscape irrigation Masdar City.',
+  },
 ]
 
-// Filter option helpers
-export const PRODUCTS       = ['Electricity', 'Gas', 'Water'] as const
-export const STATUSES       = ['Active', 'Inactive', 'Pending'] as const
-export const SUPPLIERS      = [...new Set(FULL_CONNECTIONS.map(c=>c.supplier))]
-export const GRID_OPERATORS = [...new Set(FULL_CONNECTIONS.map(c=>c.grid_operator))]
-export const MEAS_COMPANIES = [...new Set(FULL_CONNECTIONS.map(c=>c.measurement_company))]
-export const CONN_TYPES     = [...new Set(FULL_CONNECTIONS.map(c=>c.connection_type))]
-export const DEPARTMENTS    = [...new Set(FULL_CONNECTIONS.map(c=>c.department))]
-export const BUILDINGS      = [...new Set(FULL_CONNECTIONS.map(c=>c.building))]
-export const MARKET_SEGS    = [...new Set(FULL_CONNECTIONS.map(c=>c.market_segment))]
-export const MONITORINGS    = [...new Set(FULL_CONNECTIONS.map(c=>c.monitoring))]
-export const CHARACTERISTICS= [...new Set(FULL_CONNECTIONS.map(c=>c.characteristic))]
-export const USAGE_CATS     = [...new Set(FULL_CONNECTIONS.map(c=>c.usage_category))]
-export const TAX_CLUSTERS   = [...new Set(FULL_CONNECTIONS.map(c=>c.tax_cluster))]
-export const CLIENTS        = [...new Set(FULL_CONNECTIONS.map(c=>c.client))]
+// Filter helpers
+export const PRODUCTS        = ['Electricity', 'Gas', 'Water'] as const
+export const STATUSES        = ['Active', 'Inactive', 'Pending'] as const
+export const SUPPLIERS       = [...new Set(FULL_CONNECTIONS.map(c => c.supplier))]
+export const GRID_OPERATORS  = [...new Set(FULL_CONNECTIONS.map(c => c.grid_operator))]
+export const MEAS_COMPANIES  = [...new Set(FULL_CONNECTIONS.map(c => c.measurement_company))]
+export const CONN_TYPES      = [...new Set(FULL_CONNECTIONS.map(c => c.connection_type))]
+export const DEPARTMENTS     = [...new Set(FULL_CONNECTIONS.map(c => c.department))]
+export const BUILDINGS       = [...new Set(FULL_CONNECTIONS.map(c => c.building))]
+export const MARKET_SEGS     = [...new Set(FULL_CONNECTIONS.map(c => c.market_segment))]
+export const MONITORINGS     = [...new Set(FULL_CONNECTIONS.map(c => c.monitoring))]
+export const CHARACTERISTICS = [...new Set(FULL_CONNECTIONS.map(c => c.characteristic))]
+export const USAGE_CATS      = [...new Set(FULL_CONNECTIONS.map(c => c.usage_category))]
+export const TAX_CLUSTERS    = [...new Set(FULL_CONNECTIONS.map(c => c.tax_cluster))]
+export const CLIENTS         = [...new Set(FULL_CONNECTIONS.map(c => c.client))]
