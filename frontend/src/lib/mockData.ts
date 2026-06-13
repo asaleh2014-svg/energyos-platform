@@ -156,11 +156,11 @@ export const SITE_UTILITY: Record<string, string> = {
 
 /** Map site_id → connection ids (for cascading mix changes) */
 export const SITE_CONNECTIONS: Record<string, string[]> = {
-  'site-1': ['conn-001'],
-  'site-2': ['conn-002'],
-  'site-3': ['conn-003','conn-004'],
-  'site-4': ['conn-005'],
-  'site-5': ['conn-006'],
+  'site-1': ['conn-001','conn-002','conn-003','conn-004','conn-005','conn-006','conn-007','conn-008','conn-009','conn-010','conn-011','conn-024','conn-025'],
+  'site-2': ['conn-012','conn-023'],
+  'site-3': ['conn-013','conn-014','conn-021','conn-026'],
+  'site-4': ['conn-015'],
+  'site-5': ['conn-016','conn-022'],
   'site-6': [],
 }
 

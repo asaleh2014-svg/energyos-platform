@@ -1,9 +1,10 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
-import { MOCK_SITES, SITE_SPEND, UAE_UTILITY_MIXES, SITE_UTILITY, CO2_FACTORS, type ElecSource } from '@/lib/mockData'
+import { MOCK_SITES, SITE_SPEND, UAE_UTILITY_MIXES, SITE_UTILITY, CO2_FACTORS, SITE_CONNECTIONS, type ElecSource } from '@/lib/mockData'
 import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS } from '@/types'
-import { MapPin, X, ChevronDown, ChevronUp, Info, Zap } from 'lucide-react'
+import { MapPin, X, ChevronDown, ChevronUp, Info, Zap, Search } from 'lucide-react'
 import clsx from 'clsx'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -263,15 +264,43 @@ function SitePanel({ siteId, onClose }: { siteId: string; onClose: () => void })
 export default function Sites() {
   const { market, siteMixes } = useAppStore()
   const cfg = MARKET_CONFIGS[market]
-  const [activeSite, setActiveSite] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const [search, setSearch] = useState('')
+
+  const filteredSites = MOCK_SITES.filter(s => {
+    const q = search.toLowerCase()
+    return !q || s.name.toLowerCase().includes(q) || s.city.toLowerCase().includes(q) || s.country.toLowerCase().includes(q)
+  })
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <Topbar title="Sites" subtitle="Operational facility overview" />
       <div className="flex-1 overflow-y-auto p-6">
 
+        {/* Search bar */}
+        <div className="relative mb-5 max-w-sm">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+          <input
+            type="text"
+            placeholder="Search sites by name or city…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full bg-bg-card border border-border-subtle rounded-xl pl-9 pr-4 py-2 text-sm text-white placeholder-white/25 focus:outline-none focus:border-accent/50 transition-colors"
+          />
+          {search && (
+            <button onClick={() => setSearch('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors">
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        {filteredSites.length === 0 && (
+          <div className="text-center py-16 text-white/30 text-sm">No sites match "{search}"</div>
+        )}
+
         <div className="grid grid-cols-3 gap-4">
-          {MOCK_SITES.map(site => {
+          {filteredSites.map(site => {
             const spend = SITE_SPEND[site.id] ?? 0
             const util  = Math.round((spend / site.annual_budget) * 100)
             const barColor = util > 85 ? '#ef4444' : util > 60 ? '#f59e0b' : '#10b981'
@@ -279,12 +308,13 @@ export default function Sites() {
             const utility = SITE_UTILITY[site.id] ?? 'DEWA'
             const factor = calcEmissionFactor(mix)
             const factorColor = factor < 0.15 ? '#10b981' : factor < 0.35 ? '#f59e0b' : '#ef4444'
+            const connCount = (SITE_CONNECTIONS[site.id] ?? []).length
 
             return (
               <div
                 key={site.id}
                 className="card-hover cursor-pointer group"
-                onClick={() => setActiveSite(site.id)}
+                onClick={() => navigate(`/sites/${site.id}`)}
               >
                 <div className="flex items-start justify-between mb-3">
                   <div>
@@ -292,7 +322,7 @@ export default function Sites() {
                       {site.name}
                     </div>
                     <div className="flex items-center gap-1 mt-1 text-xs text-white/40">
-                      <MapPin size={10} /> {site.city}, {site.country} · {site.connections_count} connections
+                      <MapPin size={10} /> {site.city}, {site.country} · {connCount} connections
                     </div>
                   </div>
                   <span className={`status-${site.status.toLowerCase()}`}>{site.status}</span>
@@ -344,17 +374,13 @@ export default function Sites() {
                 </div>
 
                 <p className="text-[10px] text-accent-hover mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  Click to edit energy mix →
+                  View details →
                 </p>
               </div>
             )
           })}
         </div>
       </div>
-
-      {activeSite && (
-        <SitePanel siteId={activeSite} onClose={() => setActiveSite(null)} />
-      )}
     </div>
   )
 }

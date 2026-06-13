@@ -7,6 +7,7 @@ import Dashboard from '@/pages/Dashboard'
 import Analytics from '@/pages/Analytics'
 import Connections from '@/pages/Connections'
 import Sites from '@/pages/Sites'
+import SiteDetail from '@/pages/SiteDetail'
 import Meters from '@/pages/Meters'
 import AIAuditor from '@/pages/AIAuditor'
 import Reports from '@/pages/Reports'
@@ -29,7 +30,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/"             element={<Dashboard />} />
             <Route path="/analytics"    element={<Analytics />} />
             <Route path="/connections"  element={<Connections />} />
-            <Route path="/sites"        element={<Sites />} />
+            <Route path="/sites"         element={<Sites />} />
+            <Route path="/sites/:siteId" element={<SiteDetail />} />
             <Route path="/meters"       element={<Meters />} />
             <Route path="/emissions"    element={<Emissions />} />
             <Route path="/co2-forecast" element={<CO2Forecast />} />
