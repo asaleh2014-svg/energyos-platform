@@ -1,33 +1,37 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS } from '@/types'
 import {
-  LayoutDashboard, BarChart3, TrendingUp, Zap, Building2,
-  Gauge, Bot, FileText, Receipt, Settings, X, Leaf, Wallet,
+  LayoutDashboard, BarChart3, Zap, Building2, Gauge, Bot,
+  FileText, Receipt, Settings, X, Leaf, TrendingDown,
+  DollarSign, PieChart, TrendingUp,
 } from 'lucide-react'
 import clsx from 'clsx'
 
 const NAV = [
   { section: 'Overview', items: [
-    { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/analytics', icon: BarChart3, label: 'Analytics' },
-    { to: '/forecast', icon: TrendingUp, label: 'Forecast' },
+    { to: '/',          icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/analytics', icon: BarChart3,       label: 'Analytics' },
   ]},
   { section: 'Assets', items: [
-    { to: '/connections', icon: Zap, label: 'Connections' },
-    { to: '/sites', icon: Building2, label: 'Sites' },
-    { to: '/meters', icon: Gauge, label: 'Meters' },
+    { to: '/connections', icon: Zap,      label: 'Connections' },
+    { to: '/sites',       icon: Building2,label: 'Sites'       },
+    { to: '/meters',      icon: Gauge,    label: 'Meters'      },
   ]},
   { section: 'Sustainability', items: [
-    { to: '/emissions', icon: Leaf, label: 'CO₂ Emissions' },
-    { to: '/budget', icon: Wallet, label: 'Budget' },
+    { to: '/emissions',    icon: Leaf,         label: 'CO₂ Emissions' },
+    { to: '/co2-forecast', icon: TrendingDown, label: 'CO₂ Forecast'  },
+  ]},
+  { section: 'Financials', items: [
+    { to: '/financials', icon: DollarSign, label: 'Tariffs & Budget' },
+    { to: '/budget',     icon: PieChart,   label: 'Budget Detail'    },
   ]},
   { section: 'Intelligence', items: [
-    { to: '/ai', icon: Bot, label: 'AI Auditor', badge: 'AI' },
-    { to: '/reports', icon: FileText, label: 'Reports' },
+    { to: '/ai',      icon: Bot,      label: 'AI Auditor', badge: 'AI' },
+    { to: '/reports', icon: FileText, label: 'Reports'                  },
   ]},
   { section: 'Admin', items: [
-    { to: '/invoices', icon: Receipt, label: 'Invoices' },
+    { to: '/invoices', icon: Receipt,  label: 'Invoices' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ]},
 ]

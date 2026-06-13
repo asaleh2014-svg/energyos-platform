@@ -1,17 +1,18 @@
 import { useState } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
+import { useNavigate } from 'react-router-dom'
 import {
   MOCK_CONNECTIONS, MOCK_SITES,
-  CO2_FACTORS, DEFAULT_ELEC_SOURCES, METER_ANNUAL_CONSUMPTION,
-  calcMeterCO2, calcElecFactor,
+  CO2_FACTORS, DEFAULT_SITE_ELEC_SOURCES, METER_ANNUAL_CONSUMPTION,
+  SITE_CONNECTIONS, calcElecFactor,
   type ElecSource,
 } from '@/lib/mockData'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Cell, Legend,
 } from 'recharts'
-import { Leaf, Zap, Flame, Info } from 'lucide-react'
+import { Leaf, Zap, Flame, ExternalLink } from 'lucide-react'
 import clsx from 'clsx'
 
 const TT = { background:'#111520', border:'1px solid #ffffff20', borderRadius:8, fontSize:12 }
@@ -31,89 +32,36 @@ const SOURCE_LABELS: Record<string, string> = {
 
 type ViewLevel = 'portfolio' | 'site' | 'meter'
 
-// ─── Source editor for one meter ──────────────────────────────────────────────
-function SourceEditor({
-  connectionId, label, src, onChange,
-}: {
-  connectionId: string
-  label: string
-  src: ElecSource
-  onChange: (src: ElecSource) => void
-}) {
-  const keys = ['gas_fired','coal','renewable','mix'] as const
-  const total = keys.reduce((a,k) => a + src[k], 0)
-  const factor = calcElecFactor(src)
-
-  const update = (key: keyof ElecSource, val: number) => {
-    onChange({ ...src, [key]: val })
+// helper: CO2 for a connection using its site's mix
+function calcConnCO2(connId: string, mix: ElecSource): number {
+  const consumption = METER_ANNUAL_CONSUMPTION[connId]
+  if (!consumption) return 0
+  if (consumption.electricity) {
+    return (consumption.electricity * calcElecFactor(mix)) / 1000
   }
-
-  return (
-    <div className="border border-border-subtle rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <div className="text-sm font-semibold text-white">{label}</div>
-          <div className="text-xs text-white/40 font-mono mt-0.5">{connectionId.toUpperCase()}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-xs text-white/40">Emission factor</div>
-          <div className={clsx('text-sm font-semibold', factor > 0.5 ? 'text-danger-light' : factor > 0.3 ? 'text-warning-light' : 'text-success-light')}>
-            {factor.toFixed(3)} kgCO₂/kWh
-          </div>
-        </div>
-      </div>
-
-      {/* Stacked colour bar */}
-      <div className="flex h-2 rounded-full overflow-hidden mb-3 gap-0.5">
-        {keys.map(k => (
-          <div
-            key={k}
-            style={{ width: `${src[k]}%`, background: SOURCE_COLORS[k] }}
-            className="transition-all"
-          />
-        ))}
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        {keys.map(k => (
-          <div key={k}>
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-sm" style={{ background: SOURCE_COLORS[k] }} />
-                <span className="text-xs text-white/60">{SOURCE_LABELS[k]}</span>
-              </div>
-              <span className="text-xs font-medium text-white">{src[k]}%</span>
-            </div>
-            <input
-              type="range" min={0} max={100} step={5}
-              value={src[k]}
-              onChange={e => update(k, Number(e.target.value))}
-              className="w-full h-1 rounded appearance-none cursor-pointer accent-accent"
-            />
-          </div>
-        ))}
-      </div>
-
-      {Math.abs(total - 100) > 1 && (
-        <div className="mt-2 text-xs text-warning-light flex items-center gap-1">
-          <Info size={11} /> Sum = {total}% — adjust to reach 100%
-        </div>
-      )}
-    </div>
-  )
+  if (consumption.gas) {
+    return (consumption.gas * CO2_FACTORS.gas_m3) / 1000
+  }
+  return 0
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function Emissions() {
-  const { elecSources, setElecSource } = useAppStore()
+  const { siteMixes } = useAppStore()
+  const navigate = useNavigate()
   const [view, setView] = useState<ViewLevel>('portfolio')
 
-  // Use store sources, falling back to defaults
-  const sources = { ...DEFAULT_ELEC_SOURCES, ...elecSources }
+  // Build per-connection mix from site-level mixes
+  const connMix = (connId: string): ElecSource => {
+    const site = MOCK_CONNECTIONS.find(c => c.id === connId)
+    if (!site) return DEFAULT_SITE_ELEC_SOURCES['site-1']
+    const siteId = site.site_id
+    return siteMixes[siteId] ?? DEFAULT_SITE_ELEC_SOURCES[siteId] ?? DEFAULT_SITE_ELEC_SOURCES['site-1']
+  }
 
   // ── Per-meter CO₂ ────────────────────────────────────────────────────────────
   const meterCO2 = MOCK_CONNECTIONS.map(c => {
-    const tco2 = calcMeterCO2(c.id, sources)
+    const tco2 = calcConnCO2(c.id, connMix(c.id))
     const consumption = METER_ANNUAL_CONSUMPTION[c.id]
     const isGas = c.connection_type === 'Gas'
     return {
@@ -146,9 +94,6 @@ export default function Emissions() {
   const totalElecCO2 = Math.round(meterCO2.reduce((a,m) => a+m.elecTco2, 0) * 10) / 10
   const totalGasCO2  = Math.round(meterCO2.reduce((a,m) => a+m.gasTco2,  0) * 10) / 10
   const totalCO2     = totalElecCO2 + totalGasCO2
-
-  // Electricity-only meters (for source editor)
-  const elecConnections = MOCK_CONNECTIONS.filter(c => c.connection_type === 'Electricity' && METER_ANNUAL_CONSUMPTION[c.id]?.electricity)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -305,27 +250,22 @@ export default function Emissions() {
           </div>
         )}
 
-        {/* ── Electricity Source Configuration ──────────────────────────── */}
-        <div className="mt-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Zap size={14} className="text-accent-hover" />
-            <h2 className="section-title">Electricity Source Mix — per Meter</h2>
+        {/* ── Energy mix config notice ───────────────────────────────────── */}
+        <div className="mt-6 p-4 rounded-xl border border-accent/20 bg-accent/5 flex items-start gap-3">
+          <Zap size={16} className="text-accent mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-white mb-1">Energy source mix is configured per site</div>
+            <p className="text-xs text-white/50 leading-relaxed">
+              Emission factors are derived from each site's electricity source mix (DEWA, ADC, SEWA, FEWA UAE-standard defaults).
+              CO₂ factors: Gas Fired {CO2_FACTORS.electricity.gas_fired} · Coal {CO2_FACTORS.electricity.coal} · Renewable {CO2_FACTORS.electricity.renewable} · Grid Mix {CO2_FACTORS.electricity.mix} kgCO₂/kWh.
+              To adjust the mix for a site (and optionally apply to all sites in the same city), go to the Sites page.
+            </p>
           </div>
-          <p className="text-xs text-white/40 mb-5 -mt-2">
-            Configure the electricity generation source for each meter to calculate accurate CO₂ emissions.
-            CO₂ factors: Gas Fired {CO2_FACTORS.electricity.gas_fired} · Coal {CO2_FACTORS.electricity.coal} · Renewable {CO2_FACTORS.electricity.renewable} · Grid Mix {CO2_FACTORS.electricity.mix} kgCO₂/kWh
-          </p>
-          <div className="grid grid-cols-3 gap-4">
-            {elecConnections.map(c => (
-              <SourceEditor
-                key={c.id}
-                connectionId={c.id}
-                label={`${c.site_name} — ${c.meter.meter_number}`}
-                src={sources[c.id] ?? DEFAULT_ELEC_SOURCES[c.id] ?? { gas_fired:60, coal:5, renewable:10, mix:25 }}
-                onChange={src => setElecSource(c.id, src)}
-              />
-            ))}
-          </div>
+          <button
+            onClick={() => navigate('/sites')}
+            className="flex items-center gap-1.5 text-xs bg-accent hover:bg-accent-hover text-white px-3 py-2 rounded-lg transition-colors flex-shrink-0">
+            <ExternalLink size={12} /> Configure in Sites
+          </button>
         </div>
 
       </div>

@@ -105,7 +105,7 @@ export const CO2_FACTORS = {
   },
 }
 
-/** User-configurable electricity source mix per connection (percentages, must sum to 100) */
+/** User-configurable electricity source mix (percentages, must sum to 100) */
 export type ElecSource = {
   gas_fired:  number   // %
   coal:       number
@@ -113,12 +113,65 @@ export type ElecSource = {
   mix:        number
 }
 
+// ── UAE-standard grid mixes per utility (2024 actuals / published targets) ────
+// Sources: DEWA Annual Report 2023, ADWEA/TAQA 2023, SEWA, FEWA publications
+export const UAE_UTILITY_MIXES: Record<string, ElecSource & { label: string; note: string }> = {
+  DEWA: {
+    label: 'DEWA (Dubai)',
+    gas_fired: 52, coal: 0, renewable: 35, mix: 13,
+    note: 'DEWA Clean Energy Strategy 2030: 35% renewable achieved 2023 (solar + nuclear share)',
+  },
+  ADC: {
+    label: 'ADWEA/TAQA (Abu Dhabi)',
+    gas_fired: 44, coal: 0, renewable: 44, mix: 12,
+    note: 'Includes Barakah Nuclear (clean) + Sweihan & Noor solar plants',
+  },
+  SEWA: {
+    label: 'SEWA (Sharjah)',
+    gas_fired: 70, coal: 5, renewable: 5, mix: 20,
+    note: 'Sharjah grid mix; SEWA clean energy target 30% by 2030',
+  },
+  FEWA: {
+    label: 'FEWA (RAK / Fujairah / Ajman / UAQ)',
+    gas_fired: 68, coal: 5, renewable: 7, mix: 20,
+    note: 'Northern Emirates grid. RAK working toward 40% clean by 2040',
+  },
+}
+
+/** Site-level default mixes — derived from the utility that serves each site */
+export const DEFAULT_SITE_ELEC_SOURCES: Record<string, ElecSource> = {
+  'site-1': { gas_fired:52, coal:0, renewable:35, mix:13 },  // Dubai BB → DEWA
+  'site-2': { gas_fired:52, coal:0, renewable:35, mix:13 },  // DIFC → DEWA
+  'site-3': { gas_fired:44, coal:0, renewable:44, mix:12 },  // Masdar → ADC (high solar)
+  'site-4': { gas_fired:70, coal:5, renewable: 5, mix:20 },  // Sharjah → SEWA
+  'site-5': { gas_fired:68, coal:5, renewable: 7, mix:20 },  // RAK → FEWA
+  'site-6': { gas_fired:44, coal:0, renewable:44, mix:12 },  // Abu Dhabi Al Reem → ADC
+}
+
+/** Map site → utility name */
+export const SITE_UTILITY: Record<string, string> = {
+  'site-1': 'DEWA', 'site-2': 'DEWA', 'site-3': 'ADC',
+  'site-4': 'SEWA', 'site-5': 'FEWA', 'site-6': 'ADC',
+}
+
+/** Map site_id → connection ids (for cascading mix changes) */
+export const SITE_CONNECTIONS: Record<string, string[]> = {
+  'site-1': ['conn-001'],
+  'site-2': ['conn-002'],
+  'site-3': ['conn-003','conn-004'],
+  'site-4': ['conn-005'],
+  'site-5': ['conn-006'],
+  'site-6': [],
+}
+
+/** Back-compat: connection-level mix derived from site mix */
 export const DEFAULT_ELEC_SOURCES: Record<string, ElecSource> = {
-  'conn-001': { gas_fired:55, coal: 5, renewable:15, mix:25 },  // Dubai Business Bay
-  'conn-002': { gas_fired:60, coal: 5, renewable:10, mix:25 },  // DIFC Tower
-  'conn-003': { gas_fired:20, coal: 0, renewable:70, mix:10 },  // Masdar City Hub — high solar
-  'conn-005': { gas_fired:65, coal:10, renewable: 5, mix:20 },  // Sharjah Industrial
-  'conn-006': { gas_fired:60, coal: 5, renewable:10, mix:25 },  // RAK Free Zone
+  'conn-001': DEFAULT_SITE_ELEC_SOURCES['site-1'],
+  'conn-002': DEFAULT_SITE_ELEC_SOURCES['site-2'],
+  'conn-003': DEFAULT_SITE_ELEC_SOURCES['site-3'],
+  'conn-004': DEFAULT_SITE_ELEC_SOURCES['site-3'],
+  'conn-005': DEFAULT_SITE_ELEC_SOURCES['site-4'],
+  'conn-006': DEFAULT_SITE_ELEC_SOURCES['site-5'],
 }
 
 /** Annual electricity (kWh) or gas (m³) consumption per connection */
@@ -320,6 +373,100 @@ export const CONN_HOURLY_ELEC: Record<string, number[]> = Object.fromEntries(
 export const CONN_HOURLY_GAS: Record<string, number[]> = Object.fromEntries(
   CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_HOURLY.gas, G_SHARES[c.id])])
 )
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TARIFFS  (UAE commercial rates, 2024)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export interface TariffStructure {
+  commodity_elec:  number   // AED / kWh  (electricity energy charge)
+  commodity_gas:   number   // AED / m³
+  distribution:    number   // AED / kWh  (network / transport charge)
+  capacity_charge: number   // AED / kW / month
+  municipality_tax: number  // fraction (e.g. 0.10 = 10%)
+  vat:             number   // fraction (0.05 = 5%)
+}
+
+/** UAE commercial tariffs per utility — 2024 published rates */
+export const UAE_TARIFFS: Record<string, TariffStructure & { label: string }> = {
+  DEWA: {
+    label: 'DEWA (Dubai)',
+    commodity_elec:  0.44,
+    commodity_gas:   0.29,
+    distribution:    0.055,
+    capacity_charge: 12.0,
+    municipality_tax: 0.10,
+    vat: 0.05,
+  },
+  ADC: {
+    label: 'ADWEA/TAQA (Abu Dhabi)',
+    commodity_elec:  0.39,
+    commodity_gas:   0.15,
+    distribution:    0.048,
+    capacity_charge: 10.5,
+    municipality_tax: 0.05,
+    vat: 0.05,
+  },
+  SEWA: {
+    label: 'SEWA (Sharjah)',
+    commodity_elec:  0.38,
+    commodity_gas:   0.22,
+    distribution:    0.050,
+    capacity_charge: 11.0,
+    municipality_tax: 0.10,
+    vat: 0.05,
+  },
+  FEWA: {
+    label: 'FEWA (Northern Emirates)',
+    commodity_elec:  0.40,
+    commodity_gas:   0.20,
+    distribution:    0.052,
+    capacity_charge: 11.5,
+    municipality_tax: 0.10,
+    vat: 0.05,
+  },
+}
+
+/** Per-site tariff assignments (derived from which utility serves the site) */
+export const DEFAULT_SITE_TARIFFS: Record<string, TariffStructure> = {
+  'site-1': UAE_TARIFFS.DEWA,
+  'site-2': UAE_TARIFFS.DEWA,
+  'site-3': UAE_TARIFFS.ADC,
+  'site-4': UAE_TARIFFS.SEWA,
+  'site-5': UAE_TARIFFS.FEWA,
+  'site-6': UAE_TARIFFS.ADC,
+}
+
+/** Historic annual emissions (tCO₂) for path-to-zero forecast */
+export const HISTORIC_EMISSIONS: { year: number; total: number; elec: number; gas: number }[] = [
+  { year: 2020, total: 412, elec: 384, gas: 28 },
+  { year: 2021, total: 398, elec: 371, gas: 27 },
+  { year: 2022, total: 374, elec: 348, gas: 26 },
+  { year: 2023, total: 354, elec: 330, gas: 24 },
+  { year: 2024, total: 336, elec: 314, gas: 22 },
+  { year: 2025, total: 318, elec: 296, gas: 22 },   // current year estimate
+]
+
+/** Projected BAU vs decarbonisation scenarios (tCO₂) to 2050 */
+export const EMISSION_SCENARIOS: {
+  year: number
+  bau: number          // Business as usual — grid mix stays current
+  moderate: number     // Moderate action — 50% renewable by 2035
+  ambitious: number    // Ambitious — align with Dubai 2050 clean energy strategy
+  target: number       // Net zero target line
+}[] = [
+  { year:2025, bau:318, moderate:318, ambitious:318, target:318 },
+  { year:2026, bau:312, moderate:298, ambitious:272, target:0   },
+  { year:2027, bau:308, moderate:278, ambitious:232, target:0   },
+  { year:2028, bau:305, moderate:256, ambitious:192, target:0   },
+  { year:2029, bau:302, moderate:232, ambitious:158, target:0   },
+  { year:2030, bau:299, moderate:208, ambitious:128, target:0   },
+  { year:2032, bau:295, moderate:168, ambitious:92,  target:0   },
+  { year:2035, bau:290, moderate:118, ambitious:52,  target:0   },
+  { year:2040, bau:284, moderate:68,  ambitious:18,  target:0   },
+  { year:2045, bau:280, moderate:28,  ambitious:4,   target:0   },
+  { year:2050, bau:276, moderate:0,   ambitious:0,   target:0   },
+]
 
 /** Group connections by a level key and aggregate their monthly data */
 export function groupByLevel(
