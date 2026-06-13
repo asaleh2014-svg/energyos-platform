@@ -130,6 +130,180 @@ function MiniMap({ lat, lon, color }: { lat: number; lon: number; color: string 
   )
 }
 
+// ─── Meter card (matches Energiemeters block in screenshot) ───────────────────
+
+function MeterCard({ conn, color }: { conn: FullConnection; color: string }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="rounded-xl border border-border-subtle overflow-hidden" style={{ borderTopColor: color, borderTopWidth: 3 }}>
+      <div className="px-4 py-3 bg-bg-primary/40">
+        <div className="grid grid-cols-2 gap-4">
+          {/* Left: meter number + install date */}
+          <div>
+            <div className="text-[10px] text-white/40 mb-0.5">Meter number</div>
+            <div className="text-sm font-bold text-white font-mono">{conn.meter_number || '—'}</div>
+            <div className="text-[10px] text-white/40 mt-2 mb-0.5">Installation date</div>
+            <div className="text-sm font-semibold text-white">{conn.meter_install || '—'}</div>
+          </div>
+          {/* Right: type + brand */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-white/40">Type</span>
+              <span className="text-[11px] text-accent-hover font-medium">Main meter</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-white/40">Brand</span>
+              <span className="text-[11px] text-white/70">Landis+Gyr</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-white/40">Brand type</span>
+              <span className="text-[11px] text-white/60">E350</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-white/40">Monitoring</span>
+              <span className="text-[11px] text-white/70">{conn.monitoring}</span>
+            </div>
+          </div>
+        </div>
+        {/* Expand toggle */}
+        {expanded && (
+          <div className="mt-3 pt-3 border-t border-border-subtle space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-white/40">Measurement company</span>
+              <span className="text-[11px] text-white/70">{conn.measurement_company}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-white/40">Connection type</span>
+              <span className="text-[11px] text-white/70">{conn.connection_type}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-white/40">Grid operator</span>
+              <span className="text-[11px] text-white/70">{conn.grid_operator}</span>
+            </div>
+          </div>
+        )}
+      </div>
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center justify-center py-1.5 bg-bg-card/50 hover:bg-bg-card border-t border-border-subtle text-white/30 hover:text-white/60 transition-colors"
+      >
+        <ChevronDown size={14} className={clsx('transition-transform', expanded && 'rotate-180')} />
+      </button>
+    </div>
+  )
+}
+
+// ─── Meter readings card (matches Meterstanden block) ─────────────────────────
+
+function MeterReadingsCard({ conn, unit }: { conn: FullConnection; unit: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const isElec = conn.product === 'Electricity'
+  return (
+    <div className="rounded-xl border border-border-subtle overflow-hidden" style={{ borderTopColor: '#10b981', borderTopWidth: 3 }}>
+      <div className="px-4 py-3 bg-bg-primary/40">
+        <div className="grid grid-cols-2 gap-4">
+          {/* Left: Normal + return */}
+          <div>
+            <div className="text-[10px] text-white/40 mb-0.5">{isElec ? 'Normal' : 'Reading'}</div>
+            <div className="text-lg font-bold text-white">
+              {conn.reading_normal.toLocaleString()}
+              <span className="text-xs font-normal text-white/50 ml-1">{unit}</span>
+            </div>
+            {isElec && (
+              <>
+                <div className="text-[10px] text-white/40 mt-2 mb-0.5">Return normal</div>
+                <div className="text-sm font-semibold text-white/60">0 <span className="text-xs font-normal text-white/30">{unit}</span></div>
+              </>
+            )}
+          </div>
+          {/* Right: Low + return (electricity only) */}
+          {isElec ? (
+            <div>
+              <div className="text-[10px] text-white/40 mb-0.5">Low</div>
+              <div className="text-lg font-bold text-white">
+                {conn.reading_low.toLocaleString()}
+                <span className="text-xs font-normal text-white/50 ml-1">{unit}</span>
+              </div>
+              <div className="text-[10px] text-white/40 mt-2 mb-0.5">Return low</div>
+              <div className="text-sm font-semibold text-white/60">0 <span className="text-xs font-normal text-white/30">{unit}</span></div>
+            </div>
+          ) : (
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-white/40">Reading date</span>
+                <span className="text-[11px] text-white/70 font-mono">{conn.reading_date}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-white/40">Source</span>
+                <span className="text-[11px] text-white/70">{conn.measurement_company}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-white/40">Meter number</span>
+                <span className="text-[11px] font-mono text-white/60">{conn.meter_number}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Bottom meta row (electricity) */}
+        {isElec && (
+          <div className="mt-3 pt-3 border-t border-border-subtle grid grid-cols-3 gap-2">
+            <div>
+              <div className="text-[10px] text-white/40 mb-0.5">Reading date</div>
+              <div className="text-[11px] font-mono text-white/70">{conn.reading_date}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-white/40 mb-0.5">Source</div>
+              <div className="text-[11px] text-white/70">{conn.measurement_company}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-white/40 mb-0.5">Meter number</div>
+              <div className="text-[11px] font-mono text-white/60">{conn.meter_number}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Expanded history rows */}
+        {expanded && (
+          <div className="mt-3 pt-3 border-t border-border-subtle">
+            <div className="text-[10px] text-white/30 uppercase tracking-widest mb-2">Previous readings</div>
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr>
+                  {(isElec ? ['Date','Normal','Low','Source'] : ['Date','Reading','Source']).map(h=>(
+                    <th key={h} className="tbl-th text-[10px]">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[1,2,3].map(i => {
+                  const d = new Date(conn.reading_date || '2026-06-01')
+                  d.setMonth(d.getMonth() - i)
+                  const dateStr = `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`
+                  return (
+                    <tr key={i} className="tbl-row">
+                      <td className="tbl-td font-mono text-white/50">{dateStr}</td>
+                      <td className="tbl-td text-white/60">{(conn.reading_normal - i * Math.round(conn.usage_normal/12)).toLocaleString()}</td>
+                      {isElec && <td className="tbl-td text-white/60">{(conn.reading_low - i * Math.round((conn.usage_low||0)/12)).toLocaleString()}</td>}
+                      <td className="tbl-td text-white/40">{conn.measurement_company}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center justify-center py-1.5 bg-bg-card/50 hover:bg-bg-card border-t border-border-subtle text-white/30 hover:text-white/60 transition-colors"
+      >
+        <ChevronDown size={14} className={clsx('transition-transform', expanded && 'rotate-180')} />
+      </button>
+    </div>
+  )
+}
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 interface Props {
@@ -454,25 +628,7 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
                 <Zap size={13} className="text-accent" />
                 <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Energy Meters</h3>
               </div>
-              <div className="card p-0 overflow-hidden">
-                <table className="w-full text-[11px]">
-                  <thead>
-                    <tr className="border-b border-border-subtle">
-                      {['Meter number', 'Type', 'Brand', 'Installation date'].map(h => (
-                        <th key={h} className="tbl-th text-[10px]">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="hover:bg-bg-card/50">
-                      <td className="tbl-td font-mono text-white/70 text-[10px]">{conn.meter_number || '—'}</td>
-                      <td className="tbl-td text-white/60">{conn.connection_type}</td>
-                      <td className="tbl-td text-white/50">Landis+Gyr</td>
-                      <td className="tbl-td font-mono text-white/50">{conn.meter_install || '—'}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <MeterCard conn={conn} color={color} />
             </div>
 
             {/* Meter readings */}
@@ -481,43 +637,7 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
                 <Activity size={13} className="text-accent" />
                 <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Meter Readings</h3>
               </div>
-              <div className="card p-0 overflow-hidden">
-                <table className="w-full text-[11px]">
-                  <thead>
-                    <tr className="border-b border-border-subtle">
-                      {['Tariff', `Reading (${unit})`, 'Reading date', 'Source'].map(h => (
-                        <th key={h} className="tbl-th text-[10px]">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {conn.product === 'Electricity' && (
-                      <>
-                        <tr className="border-b border-border-subtle hover:bg-bg-card/50">
-                          <td className="tbl-td text-white/60">Normal</td>
-                          <td className="tbl-td text-white/80 font-semibold">{conn.reading_normal.toLocaleString()}</td>
-                          <td className="tbl-td font-mono text-white/50">{conn.reading_date}</td>
-                          <td className="tbl-td text-white/40">Smart meter</td>
-                        </tr>
-                        <tr className="hover:bg-bg-card/50">
-                          <td className="tbl-td text-white/60">Low</td>
-                          <td className="tbl-td text-white/80 font-semibold">{conn.reading_low.toLocaleString()}</td>
-                          <td className="tbl-td font-mono text-white/50">{conn.reading_date}</td>
-                          <td className="tbl-td text-white/40">Smart meter</td>
-                        </tr>
-                      </>
-                    )}
-                    {conn.product !== 'Electricity' && (
-                      <tr className="hover:bg-bg-card/50">
-                        <td className="tbl-td text-white/60">Total</td>
-                        <td className="tbl-td text-white/80 font-semibold">{conn.reading_normal.toLocaleString()}</td>
-                        <td className="tbl-td font-mono text-white/50">{conn.reading_date}</td>
-                        <td className="tbl-td text-white/40">Smart meter</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <MeterReadingsCard conn={conn} unit={unit} />
             </div>
 
             {/* Bottom spacer */}

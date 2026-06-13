@@ -2,10 +2,10 @@ import { useState, useMemo } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import {
   Download, RefreshCw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  X, List, Map as MapIcon, Zap, Flame, Droplets, Gauge, AlertTriangle,
+  X, List, Map as MapIcon, Zap, Flame, Droplets,
 } from 'lucide-react'
-import { format } from 'date-fns'
-import { MOCK_CONNECTIONS } from '@/lib/mockData'
+import { MOCK_CONNECTIONS as _MC } from '@/lib/mockData'
+void _MC
 import clsx from 'clsx'
 import {
   FULL_CONNECTIONS, PRODUCTS, STATUSES, SUPPLIERS, GRID_OPERATORS,
@@ -197,16 +197,6 @@ function ConnectionsMap({
   )
 }
 
-// ─── Meter view helpers ───────────────────────────────────────────────────────
-function lastSyncLabel(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
-}
-
 // ─── Filter state ─────────────────────────────────────────────────────────────
 interface Filters {
   ean: string; product: string; status: string; supplier: string
@@ -224,10 +214,8 @@ const EMPTY: Filters = {
 export default function Connections() {
   const [filters, setFilters] = useState<Filters>(EMPTY)
   const [page, setPage]       = useState(1)
-  const [viewMode, setViewMode] = useState<'list' | 'map' | 'meters'>('list')
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
   const [selected, setSelected] = useState<FullConnection | null>(null)
-
-  const upgradeNeeded = MOCK_CONNECTIONS.filter(c => c.meter.type === 'Traditional').length
 
   const set = (key: keyof Filters) => (val: string) => {
     setFilters(f => ({ ...f, [key]: val })); setPage(1)
@@ -330,12 +318,11 @@ export default function Connections() {
             <div className="flex items-center justify-between mb-4">
               <h1 className="text-2xl font-light text-white/80 italic">Connections</h1>
 
-              {/* List / Meters / Map toggle */}
+              {/* List / Map toggle */}
               <div className="flex items-center bg-bg-card border border-border-subtle rounded-lg p-0.5 gap-0.5">
                 {([
-                  { id: 'list',   icon: List,    label: 'List'   },
-                  { id: 'meters', icon: Gauge,   label: 'Meters' },
-                  { id: 'map',    icon: MapIcon, label: 'Map'    },
+                  { id: 'list', icon: List,    label: 'List' },
+                  { id: 'map',  icon: MapIcon, label: 'Map'  },
                 ] as const).map(({ id, icon: Icon, label }) => (
                   <button key={id}
                     onClick={() => setViewMode(id)}
@@ -356,82 +343,6 @@ export default function Connections() {
                 {activeFilters.map(([key, val]) => (
                   <Chip key={key} label={`${key}: ${val}`} onRemove={() => set(key)('')} />
                 ))}
-              </div>
-            )}
-
-            {/* ── METERS VIEW ──────────────────────────────────────────── */}
-            {viewMode === 'meters' && (
-              <div>
-                {upgradeNeeded > 0 && (
-                  <div className="flex items-center gap-2 p-3 mb-4 rounded-xl border border-warning/30 bg-warning/5 text-xs text-warning-light">
-                    <AlertTriangle size={13} className="flex-shrink-0" />
-                    {upgradeNeeded} traditional meters flagged — smart meter upgrade required under UAE regulations by Q2 2026.
-                  </div>
-                )}
-                <div className="card p-0 overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-border-subtle">
-                        {['Meter Number','Connection','Building','City','Type','Installed','Last Sync','Interval','Meter Status'].map(h => (
-                          <th key={h} className="tbl-th whitespace-nowrap">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filtered.length === 0 && (
-                        <tr><td colSpan={9} className="text-center py-12 text-white/30">No meters match the active filters</td></tr>
-                      )}
-                      {filtered.map((c, idx) => {
-                        const mc = MOCK_CONNECTIONS.find(m => m.id === c.id)
-                        const meter = mc?.meter
-                        const isSmart   = c.monitoring === 'Smart'
-                        const isBasic   = c.monitoring === 'Basic'
-                        const online    = meter ? Date.now() - new Date(meter.last_sync_at).getTime() < 3600000 : false
-                        const lastSync  = meter ? lastSyncLabel(meter.last_sync_at) : '—'
-                        const interval  = meter
-                          ? meter.interval_minutes < 60
-                            ? `${meter.interval_minutes} min`
-                            : meter.interval_minutes < 1440 ? `${meter.interval_minutes / 60}h` : 'Monthly'
-                          : '—'
-                        return (
-                          <tr key={c.id}
-                            onClick={() => setSelected(c)}
-                            className={clsx(
-                              'border-b border-border-subtle cursor-pointer transition-colors',
-                              idx % 2 === 0 ? 'bg-[#0d3d4a]/40 hover:bg-[#0d3d4a]/80' : 'hover:bg-bg-card/50'
-                            )}
-                          >
-                            <td className="tbl-td font-mono text-white/70 whitespace-nowrap">
-                              {meter?.meter_number ?? c.meter_number ?? '—'}
-                            </td>
-                            <td className="tbl-td text-white/80 font-medium max-w-[140px] truncate">{c.name}</td>
-                            <td className="tbl-td text-white/60">{c.building}</td>
-                            <td className="tbl-td text-white/60">{c.city}</td>
-                            <td className="tbl-td">
-                              <span className={isSmart ? 'status-active' : isBasic ? 'status-pending' : 'status-inactive'}>
-                                {c.monitoring}
-                              </span>
-                            </td>
-                            <td className="tbl-td text-white/40">
-                              {meter ? format(new Date(meter.commissioned_at), 'MMM yyyy') : c.meter_install || '—'}
-                            </td>
-                            <td className="tbl-td text-white/40">{lastSync}</td>
-                            <td className="tbl-td text-white/50">{interval}</td>
-                            <td className="tbl-td">
-                              {isSmart
-                                ? <span className={online ? 'status-active' : 'status-pending'}>{online ? 'Online' : 'Delayed'}</span>
-                                : isBasic
-                                  ? <span className="status-pending">Basic</span>
-                                  : <span className="status-inactive">Upgrade due</span>
-                              }
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="mt-2 text-[11px] text-white/30 text-right">{filtered.length} meters · click row to open connection detail</div>
               </div>
             )}
 
