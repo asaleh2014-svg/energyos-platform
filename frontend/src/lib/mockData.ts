@@ -220,3 +220,134 @@ export const METER_BUDGETS: MeterBudget[] = [
   { connection_id:'conn-005', meter:'MTR-UAE-7710', site:'Sharjah Industrial Zone', type:'Electricity', monthly: mkMonths(2800, 420, 210, VAR_SHA)  },
   { connection_id:'conn-006', meter:'MTR-UAE-7711', site:'RAK Free Zone',           type:'Electricity', monthly: mkMonths(3400, 520, 260, VAR_RAK)  },
 ]
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// GROUPING HIERARCHY  (connection → building → site → city → country)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type GroupLevel = 'portfolio' | 'connection' | 'building' | 'site' | 'city' | 'country'
+
+export interface ConnectionMeta {
+  id:          string
+  label:       string   // short display name
+  product:     'Electricity' | 'Gas'
+  building:    string
+  site:        string
+  city:        string
+  country:     string
+}
+
+export const CONNECTION_META: ConnectionMeta[] = [
+  { id:'conn-001', label:'BBY Main',         product:'Electricity', building:'Tower A',          site:'Dubai Business Bay',      city:'Dubai',          country:'UAE' },
+  { id:'conn-002', label:'DIFC Tower',        product:'Electricity', building:'Office Tower',     site:'DIFC Tower',              city:'Dubai',          country:'UAE' },
+  { id:'conn-003', label:'Masdar HQ Elec',    product:'Electricity', building:'Masdar HQ',        site:'Masdar City Hub',         city:'Abu Dhabi',      country:'UAE' },
+  { id:'conn-004', label:'Masdar HQ Gas',     product:'Gas',         building:'Masdar HQ',        site:'Masdar City Hub',         city:'Abu Dhabi',      country:'UAE' },
+  { id:'conn-005', label:'Sharjah Industrial',product:'Electricity', building:'Industrial Unit A', site:'Sharjah Industrial Zone', city:'Sharjah',        country:'UAE' },
+  { id:'conn-006', label:'RAK Factory',       product:'Electricity', building:'Factory A',        site:'RAK Free Zone',           city:'Ras Al Khaimah', country:'UAE' },
+]
+
+// Monthly electricity consumption per connection (kWh).
+// Each row sums to the CONSUMPTION_MONTHLY fleet total for electricity.
+// Shares: conn-001≈20.5%, conn-002≈25.7%, conn-003≈34.0%, conn-005≈9.2%, conn-006≈10.6%
+// conn-004 is Gas only — its electricity values are 0.
+const E_SHARES: Record<string, number> = {
+  'conn-001': 0.2050,
+  'conn-002': 0.2568,
+  'conn-003': 0.3397,
+  'conn-004': 0,
+  'conn-005': 0.0916,
+  'conn-006': 0.1069,
+}
+
+// Monthly gas consumption per connection (m³).
+// Only conn-004 has gas in the core fleet; share = 1.0.
+const G_SHARES: Record<string, number> = {
+  'conn-001': 0,
+  'conn-002': 0,
+  'conn-003': 0,
+  'conn-004': 1.0,
+  'conn-005': 0,
+  'conn-006': 0,
+}
+
+function applyShare(totals: number[], share: number): number[] {
+  return totals.map(v => Math.round(v * share))
+}
+
+/** Monthly electricity kWh per connection (12 values) */
+export const CONN_MONTHLY_ELEC: Record<string, number[]> = Object.fromEntries(
+  CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_MONTHLY.electricity, E_SHARES[c.id])])
+)
+
+/** Monthly gas m³ per connection (12 values) */
+export const CONN_MONTHLY_GAS: Record<string, number[]> = Object.fromEntries(
+  CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_MONTHLY.gas, G_SHARES[c.id])])
+)
+
+/** Yearly electricity kWh per connection (5 values: 2021..2025) */
+export const CONN_YEARLY_ELEC: Record<string, number[]> = Object.fromEntries(
+  CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_YEARLY.electricity, E_SHARES[c.id])])
+)
+
+/** Yearly gas m³ per connection */
+export const CONN_YEARLY_GAS: Record<string, number[]> = Object.fromEntries(
+  CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_YEARLY.gas, G_SHARES[c.id])])
+)
+
+// Weekly electricity per connection (52 values, scaled from CONSUMPTION_WEEKLY)
+export const CONN_WEEKLY_ELEC: Record<string, number[]> = Object.fromEntries(
+  CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_WEEKLY.electricity, E_SHARES[c.id])])
+)
+
+export const CONN_WEEKLY_GAS: Record<string, number[]> = Object.fromEntries(
+  CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_WEEKLY.gas, G_SHARES[c.id])])
+)
+
+// Daily electricity per connection (30 values)
+export const CONN_DAILY_ELEC: Record<string, number[]> = Object.fromEntries(
+  CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_DAILY.electricity, E_SHARES[c.id])])
+)
+
+export const CONN_DAILY_GAS: Record<string, number[]> = Object.fromEntries(
+  CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_DAILY.gas, G_SHARES[c.id])])
+)
+
+// Hourly electricity per connection (24 values)
+export const CONN_HOURLY_ELEC: Record<string, number[]> = Object.fromEntries(
+  CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_HOURLY.electricity, E_SHARES[c.id])])
+)
+
+export const CONN_HOURLY_GAS: Record<string, number[]> = Object.fromEntries(
+  CONNECTION_META.map(c => [c.id, applyShare(CONSUMPTION_HOURLY.gas, G_SHARES[c.id])])
+)
+
+/** Group connections by a level key and aggregate their monthly data */
+export function groupByLevel(
+  level: Exclude<GroupLevel, 'portfolio'>,
+  product: 'electricity' | 'gas',
+  granularity: 'hour' | 'day' | 'week' | 'month' | 'year'
+): { name: string; values: number[] }[] {
+  const elecMap: Record<string, Record<string, number[]>> = {
+    hour: CONN_HOURLY_ELEC, day: CONN_DAILY_ELEC, week: CONN_WEEKLY_ELEC,
+    month: CONN_MONTHLY_ELEC, year: CONN_YEARLY_ELEC,
+  }
+  const gasMap: Record<string, Record<string, number[]>> = {
+    hour: CONN_HOURLY_GAS, day: CONN_DAILY_GAS, week: CONN_WEEKLY_GAS,
+    month: CONN_MONTHLY_GAS, year: CONN_YEARLY_GAS,
+  }
+  const connData = product === 'electricity' ? elecMap[granularity] : gasMap[granularity]
+  const key = level === 'connection' ? 'id'
+            : level === 'building'   ? 'building'
+            : level === 'site'       ? 'site'
+            : level === 'city'       ? 'city'
+            :                          'country'
+
+  const groups: Record<string, number[]> = {}
+  for (const meta of CONNECTION_META) {
+    const groupName = meta[key as keyof ConnectionMeta] as string
+    const vals = connData[meta.id] ?? []
+    if (!groups[groupName]) groups[groupName] = vals.map(() => 0)
+    groups[groupName] = groups[groupName].map((v, i) => v + (vals[i] ?? 0))
+  }
+  return Object.entries(groups).map(([name, values]) => ({ name, values }))
+}
