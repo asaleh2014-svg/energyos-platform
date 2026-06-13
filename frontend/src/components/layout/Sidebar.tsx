@@ -16,7 +16,6 @@ const NAV = [
   { section: 'Assets', items: [
     { to: '/connections', icon: Zap,      label: 'Connections' },
     { to: '/sites',       icon: Building2,label: 'Sites'       },
-    { to: '/meters',      icon: Gauge,    label: 'Meters'      },
   ]},
   { section: 'Sustainability', items: [
     { to: '/emissions',    icon: Leaf,         label: 'CO₂ Emissions' },

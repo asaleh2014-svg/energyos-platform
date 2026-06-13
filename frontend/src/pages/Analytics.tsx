@@ -9,6 +9,7 @@ import {
   type GroupLevel,
 } from '@/lib/mockData'
 import { Zap, Flame } from 'lucide-react'
+import { ChartCard } from '@/components/ChartCard'
 import {
   ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Legend,
@@ -114,15 +115,13 @@ function PortfolioView({
       </div>
 
       {/* Main dual-axis chart */}
-      <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="section-title">Fleet Total — {GRAN.find(g=>g.id===gran)!.label} View</h2>
-            <p className="text-xs text-white/30 mt-0.5">Dual axis · electricity (left) + gas (right)</p>
-          </div>
+      <ChartCard
+        title={`Fleet Total — ${GRAN.find(g=>g.id===gran)!.label} View`}
+        subtitle="Dual axis · electricity (left) + gas (right)"
+        action={
           <div className="flex gap-2">
             {[
-              { active: showElec, set: setShowElec, color:'blue', Icon: Zap,   label:'Electricity' },
+              { active: showElec, set: setShowElec, color:'blue',  Icon: Zap,   label:'Electricity' },
               { active: showGas,  set: setShowGas,  color:'amber', Icon: Flame, label:'Gas' },
             ].map(({ active, set, color, Icon, label }) => (
               <button key={label} onClick={() => set(!active)}
@@ -136,8 +135,26 @@ function PortfolioView({
               </button>
             ))}
           </div>
-        </div>
-
+        }
+        table={
+          <table className="w-full">
+            <thead><tr>
+              <th className="tbl-th">Period</th>
+              {showElec && <th className="tbl-th">Electricity ({unit})</th>}
+              {showGas  && <th className="tbl-th">Gas (m³)</th>}
+            </tr></thead>
+            <tbody>
+              {chartData.map(row => (
+                <tr key={row.label} className="tbl-row">
+                  <td className="tbl-td text-white/70">{row.label}</td>
+                  {showElec && <td className="tbl-td text-blue-300">{(row.electricity as number ?? 0).toLocaleString()}</td>}
+                  {showGas  && <td className="tbl-td text-amber-300">{(row.gas as number ?? 0).toLocaleString()}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        }
+      >
         <ResponsiveContainer width="100%" height={320}>
           <ComposedChart data={chartData} margin={{ top:5, right:20, left:-5, bottom:5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
@@ -166,7 +183,7 @@ function PortfolioView({
             )}
           </ComposedChart>
         </ResponsiveContainer>
-      </div>
+      </ChartCard>
 
       {/* Bottom mini charts */}
       <div className="grid grid-cols-2 gap-4 mt-4">
@@ -174,8 +191,23 @@ function PortfolioView({
           { key:'electricity', title:'⚡ Electricity Only', color:'#3b82f6', data: chartData, unit },
           { key:'gas',         title:'🔥 Gas Only',         color:'#f59e0b', data: chartData, unit:'m³' },
         ].map(({ key, title, color, data, unit: u }) => (
-          <div key={key} className="card">
-            <h2 className="section-title mb-3">{title}</h2>
+          <ChartCard
+            key={key}
+            title={title}
+            table={
+              <table className="w-full">
+                <thead><tr><th className="tbl-th">Period</th><th className="tbl-th">{u}</th></tr></thead>
+                <tbody>
+                  {data.map(row => (
+                    <tr key={row.label} className="tbl-row">
+                      <td className="tbl-td text-white/70">{row.label}</td>
+                      <td className="tbl-td" style={{ color }}>{(row[key as keyof typeof row] as number ?? 0).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            }
+          >
             <ResponsiveContainer width="100%" height={190}>
               <BarChart data={data} margin={{ top:0, right:0, left:-15, bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
@@ -188,7 +220,7 @@ function PortfolioView({
                 <Bar dataKey={key} fill={color} opacity={0.85} radius={[3,3,0,0]} maxBarSize={28} />
               </BarChart>
             </ResponsiveContainer>
-          </div>
+          </ChartCard>
         ))}
       </div>
     </>
@@ -255,9 +287,25 @@ function GroupedView({
 
       {/* Electricity stacked bar */}
       {elecFiltered.length > 0 && (
-        <div className="card mb-4">
-          <h2 className="section-title mb-1">⚡ Electricity by {GROUP_LEVELS.find(l=>l.id===groupLevel)!.label} ({unit})</h2>
-          <p className="text-xs text-white/30 mb-4">Stacked bars — each colour is one {groupLevel}</p>
+        <ChartCard
+          title={`⚡ Electricity by ${GROUP_LEVELS.find(l=>l.id===groupLevel)!.label} (${unit})`}
+          subtitle={`Stacked bars — each colour is one ${groupLevel}`}
+          className="mb-4"
+          table={
+            <table className="w-full">
+              <thead><tr><th className="tbl-th">Group</th><th className="tbl-th">Total ({unit})</th><th className="tbl-th">% of fleet</th></tr></thead>
+              <tbody>
+                {elecTotals.sort((a,b)=>b.total-a.total).map(g=>(
+                  <tr key={g.name} className="tbl-row">
+                    <td className="tbl-td text-white/80">{connLabel(g.name)}</td>
+                    <td className="tbl-td text-blue-300">{g.total.toLocaleString()}</td>
+                    <td className="tbl-td text-white/50">{grandElec>0?((g.total/grandElec)*100).toFixed(1):0}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          }
+        >
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={elecData} margin={{ top:5, right:10, left:-5, bottom:5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
@@ -279,14 +327,30 @@ function GroupedView({
               ))}
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
       )}
 
       {/* Gas stacked bar */}
       {gasFiltered.length > 0 && (
-        <div className="card mb-4">
-          <h2 className="section-title mb-1">🔥 Gas by {GROUP_LEVELS.find(l=>l.id===groupLevel)!.label} (m³)</h2>
-          <p className="text-xs text-white/30 mb-4">Stacked bars — each colour is one {groupLevel}</p>
+        <ChartCard
+          title={`🔥 Gas by ${GROUP_LEVELS.find(l=>l.id===groupLevel)!.label} (m³)`}
+          subtitle={`Stacked bars — each colour is one ${groupLevel}`}
+          className="mb-4"
+          table={
+            <table className="w-full">
+              <thead><tr><th className="tbl-th">Group</th><th className="tbl-th">Total (m³)</th><th className="tbl-th">% of fleet</th></tr></thead>
+              <tbody>
+                {gasTotals.sort((a,b)=>b.total-a.total).map(g=>(
+                  <tr key={g.name} className="tbl-row">
+                    <td className="tbl-td text-white/80">{connLabel(g.name)}</td>
+                    <td className="tbl-td text-amber-300">{g.total.toLocaleString()}</td>
+                    <td className="tbl-td text-white/50">{grandGas>0?((g.total/grandGas)*100).toFixed(1):0}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          }
+        >
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={gasData} margin={{ top:5, right:10, left:-5, bottom:5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
@@ -304,7 +368,7 @@ function GroupedView({
               ))}
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
       )}
 
       {/* Breakdown table */}

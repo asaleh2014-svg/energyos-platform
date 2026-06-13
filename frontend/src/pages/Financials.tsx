@@ -12,6 +12,7 @@ import {
 } from 'recharts'
 import clsx from 'clsx'
 import { Edit2, Check, X, Copy, ChevronDown } from 'lucide-react'
+import { ChartCard } from '@/components/ChartCard'
 
 type Tab = 'tariffs' | 'budget' | 'projections' | 'deviations'
 const TABS: { id: Tab; label: string }[] = [
@@ -287,8 +288,26 @@ function BudgetTab() {
       </div>
 
       {/* Monthly budget vs actual */}
-      <div className="card">
-        <h2 className="section-title mb-4">Monthly Budget vs Actual (AED)</h2>
+      <ChartCard
+        title="Monthly Budget vs Actual (AED)"
+        table={
+          <table className="w-full">
+            <thead><tr>{['Month','Budget (AED)','Actual (AED)','Deviation'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
+            <tbody>
+              {monthlyData.map(row=>(
+                <tr key={row.month} className="tbl-row">
+                  <td className="tbl-td text-white/70">{row.month}</td>
+                  <td className="tbl-td font-mono text-blue-300">{row.budget.toLocaleString()}</td>
+                  <td className="tbl-td font-mono text-white/70">{row.actual.toLocaleString()}</td>
+                  <td className={clsx('tbl-td font-mono font-semibold', row.deviation>0?'text-danger-light':'text-success-light')}>
+                    {row.deviation>0?'+':''}{row.deviation.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        }
+      >
         <ResponsiveContainer width="100%" height={280}>
           <BarChart data={monthlyData} margin={{ top:5, right:20, left:-5, bottom:5 }} barGap={2}>
             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
@@ -301,7 +320,7 @@ function BudgetTab() {
             <Bar dataKey="actual" name="Actual" fill="#3b82f6" opacity={0.85} radius={[3,3,0,0]} maxBarSize={28} />
           </BarChart>
         </ResponsiveContainer>
-      </div>
+      </ChartCard>
 
       {/* Per-meter breakdown table */}
       <div className="card p-0 overflow-hidden">
@@ -413,9 +432,28 @@ function ProjectionsTab() {
         </div>
       </div>
 
-      <div className="card">
-        <h2 className="section-title mb-1">12-Month Cost Projection (AED)</h2>
-        <p className="text-xs text-white/30 mb-4">Stacked: Commodity + Transport/Network + Taxes</p>
+      <ChartCard
+        title="12-Month Cost Projection (AED)"
+        subtitle="Stacked: Commodity + Transport/Network + Taxes"
+        table={
+          <table className="w-full">
+            <thead><tr>{['Month','Elec Commodity','Gas Commodity','Transport','Tax','VAT','Total'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
+            <tbody>
+              {projData.map(row=>(
+                <tr key={row.month} className="tbl-row">
+                  <td className="tbl-td text-white/70">{row.month}</td>
+                  <td className="tbl-td font-mono text-blue-300">{row.elecCommodity.toLocaleString()}</td>
+                  <td className="tbl-td font-mono text-amber-300">{row.gasCommmodity.toLocaleString()}</td>
+                  <td className="tbl-td font-mono text-purple-300">{row.transport.toLocaleString()}</td>
+                  <td className="tbl-td font-mono text-red-300">{row.tax.toLocaleString()}</td>
+                  <td className="tbl-td font-mono text-white/50">{row.vat.toLocaleString()}</td>
+                  <td className="tbl-td font-mono text-white font-semibold">{row.total.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        }
+      >
         <ResponsiveContainer width="100%" height={280}>
           <BarChart data={projData} margin={{ top:5, right:20, left:-5, bottom:5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
@@ -432,7 +470,7 @@ function ProjectionsTab() {
             <Bar dataKey="vat"           name="VAT"            stackId="c" fill="#6b7280"  opacity={0.7} radius={[3,3,0,0]} />
           </BarChart>
         </ResponsiveContainer>
-      </div>
+      </ChartCard>
     </div>
   )
 }
@@ -453,9 +491,28 @@ function DeviationsTab() {
 
   return (
     <div className="space-y-5">
-      <div className="card">
-        <h2 className="section-title mb-1">Monthly Deviation vs Budget (AED)</h2>
-        <p className="text-xs text-white/30 mb-4">Green = under budget · Red = over budget</p>
+      <ChartCard
+        title="Monthly Deviation vs Budget (AED)"
+        subtitle="Green = under budget · Red = over budget"
+        table={
+          <table className="w-full">
+            <thead><tr>{['Month','Deviation (AED)','%'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
+            <tbody>
+              {monthlyData.map(row=>(
+                <tr key={row.month} className="tbl-row">
+                  <td className="tbl-td text-white/70">{row.month}</td>
+                  <td className={clsx('tbl-td font-mono font-semibold', row.deviation>0?'text-danger-light':'text-success-light')}>
+                    {row.deviation>0?'+':''}{row.deviation.toLocaleString()}
+                  </td>
+                  <td className={clsx('tbl-td text-[11px] font-semibold', row.deviation>0?'text-danger-light':'text-success-light')}>
+                    {row.deviation>0?'+':''}{row.pct.toFixed(1)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        }
+      >
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={monthlyData} margin={{ top:5, right:20, left:-5, bottom:5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
@@ -472,7 +529,7 @@ function DeviationsTab() {
             </Bar>
           </BarChart>
         </ResponsiveContainer>
-      </div>
+      </ChartCard>
 
       <div className="card p-0 overflow-hidden">
         <div className="px-5 py-3 border-b border-border-subtle">

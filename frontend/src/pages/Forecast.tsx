@@ -3,6 +3,7 @@ import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS } from '@/types'
 import { COST_MONTHLY, MONTHS } from '@/lib/mockData'
 import { ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area } from 'recharts'
+import { ChartCard } from '@/components/ChartCard'
 
 const FORECAST_MONTHS = [...MONTHS, 'Jan*', 'Feb*', 'Mar*']
 
@@ -29,14 +30,38 @@ export default function Forecast() {
           📡 Forecast uses season-adjusted linear regression on 12 months of actuals. Dotted line = 90-day projection. Months marked * are forecast.
         </div>
 
-        <div className="card mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="section-title">Cost Forecast — 90 Day Horizon</h2>
+        <ChartCard
+          title="Cost Forecast — 90 Day Horizon"
+          className="mb-6"
+          action={
             <div className="flex items-center gap-4 text-xs text-white/40">
               <span className="flex items-center gap-1.5"><span className="inline-block w-5 border-t-2 border-accent"></span>Actuals</span>
               <span className="flex items-center gap-1.5"><span className="inline-block w-5 border-t-2 border-dashed border-warning"></span>Forecast</span>
             </div>
-          </div>
+          }
+          table={
+            <table className="w-full">
+              <thead><tr>
+                <th className="tbl-th">Month</th>
+                <th className="tbl-th">Actual ({cfg.currencySymbol})</th>
+                <th className="tbl-th">Forecast ({cfg.currencySymbol})</th>
+                <th className="tbl-th">Lower Band</th>
+                <th className="tbl-th">Upper Band</th>
+              </tr></thead>
+              <tbody>
+                {historicData.map(row => (
+                  <tr key={row.month} className="tbl-row">
+                    <td className="tbl-td text-white/70">{row.month}</td>
+                    <td className="tbl-td text-blue-300 font-mono">{row.actual != null ? row.actual.toLocaleString() : '—'}</td>
+                    <td className="tbl-td text-amber-300 font-mono">{row.forecast != null ? row.forecast.toLocaleString() : '—'}</td>
+                    <td className="tbl-td text-white/40 font-mono">{row.lower != null ? row.lower.toLocaleString() : '—'}</td>
+                    <td className="tbl-td text-white/40 font-mono">{row.upper != null ? row.upper.toLocaleString() : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          }
+        >
           <ResponsiveContainer width="100%" height={300}>
             <ComposedChart data={historicData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <defs>
@@ -61,7 +86,7 @@ export default function Forecast() {
               <Line type="monotone" dataKey="lower" name="Lower band" stroke="#f59e0b20" strokeWidth={0} connectNulls={false} dot={false} />
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
 
         <div className="grid grid-cols-3 gap-4">
           <div className="card">
