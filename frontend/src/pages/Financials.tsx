@@ -233,18 +233,25 @@ function TariffsTab() {
 
 // ─── Budget tab ───────────────────────────────────────────────────────────────
 
-function BudgetTab() {
-  const totalBudget = METER_BUDGETS.reduce((sum, m) =>
-    sum + m.monthly.reduce((s, mo) => s + mo.commodity_budget + mo.transport_budget + mo.tax_budget, 0), 0)
-  const totalActual = METER_BUDGETS.reduce((sum, m) =>
-    sum + m.monthly.reduce((s, mo) => s + mo.commodity_actual + mo.transport_actual + mo.tax_actual, 0), 0)
+function BudgetTab({ filters }: { filters: CostReportFilters }) {
+  const factor = 1 - filters.savings / 100
+  const meterFilter = (m: typeof METER_BUDGETS[0]) =>
+    filters.product === 'electricity' ? m.type === 'Electricity'
+    : filters.product === 'gas'       ? m.type === 'Gas'
+    : true
+  const filteredBudgets = METER_BUDGETS.filter(meterFilter)
+
+  const totalBudget = filteredBudgets.reduce((sum, m) =>
+    sum + m.monthly.reduce((s, mo) => s + mo.commodity_budget + mo.transport_budget + mo.tax_budget, 0), 0) * factor
+  const totalActual = filteredBudgets.reduce((sum, m) =>
+    sum + m.monthly.reduce((s, mo) => s + mo.commodity_actual + mo.transport_actual + mo.tax_actual, 0), 0) * factor
   const deviation = totalActual - totalBudget
-  const pct = ((deviation / totalBudget) * 100).toFixed(1)
+  const pct = totalBudget > 0 ? ((deviation / totalBudget) * 100).toFixed(1) : '0'
 
   const monthlyData = MONTHS.map((month, i) => {
-    const budget = METER_BUDGETS.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_budget + mo.transport_budget + mo.tax_budget }, 0)
-    const actual = METER_BUDGETS.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_actual + mo.transport_actual + mo.tax_actual }, 0)
-    return { month, budget, actual, deviation: actual - budget }
+    const budget = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_budget + mo.transport_budget + mo.tax_budget }, 0) * factor
+    const actual = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_actual + mo.transport_actual + mo.tax_actual }, 0) * factor
+    return { month, budget: Math.round(budget), actual: Math.round(actual), deviation: Math.round(actual - budget) }
   })
 
   return (
@@ -343,7 +350,8 @@ function BudgetTab() {
 
 // ─── Projections tab ──────────────────────────────────────────────────────────
 
-function ProjectionsTab() {
+function ProjectionsTab({ filters }: { filters: CostReportFilters }) {
+  const factor = 1 - filters.savings / 100
   const { siteTariffs } = useAppStore()
 
   const projData = MONTHS.map((month, i) => {
@@ -359,9 +367,9 @@ function ProjectionsTab() {
       capacity_charge: a.capacity_charge + t.capacity_charge / sites.length,
     }), { commodity_elec:0, commodity_gas:0, distribution:0, municipality_tax:0, vat:0, capacity_charge:0 })
 
-    const elecCommodity = Math.round(elecKwh * avgTariff.commodity_elec)
-    const gasCommmodity = Math.round(gasM3   * avgTariff.commodity_gas)
-    const transport     = Math.round(elecKwh * avgTariff.distribution)
+    const elecCommodity = Math.round(elecKwh * avgTariff.commodity_elec * factor)
+    const gasCommmodity = Math.round(gasM3   * avgTariff.commodity_gas  * factor)
+    const transport     = Math.round(elecKwh * avgTariff.distribution   * factor)
     const subtotal      = elecCommodity + gasCommmodity + transport
     const tax           = Math.round(subtotal * avgTariff.municipality_tax)
     const vat           = Math.round((subtotal + tax) * avgTariff.vat)
@@ -437,11 +445,18 @@ function ProjectionsTab() {
 
 // ─── Deviations tab ───────────────────────────────────────────────────────────
 
-function DeviationsTab() {
+function DeviationsTab({ filters }: { filters: CostReportFilters }) {
+  const factor = 1 - filters.savings / 100
+  const meterFilter = (m: typeof METER_BUDGETS[0]) =>
+    filters.product === 'electricity' ? m.type === 'Electricity'
+    : filters.product === 'gas'       ? m.type === 'Gas'
+    : true
+  const filteredBudgets = METER_BUDGETS.filter(meterFilter)
+
   const monthlyData = MONTHS.map((month, i) => {
-    const budget = METER_BUDGETS.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_budget + mo.transport_budget + mo.tax_budget }, 0)
-    const actual = METER_BUDGETS.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_actual + mo.transport_actual + mo.tax_actual }, 0)
-    return { month, deviation: actual - budget, pct: ((actual - budget) / budget * 100) }
+    const budget = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_budget + mo.transport_budget + mo.tax_budget }, 0) * factor
+    const actual = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_actual + mo.transport_actual + mo.tax_actual }, 0) * factor
+    return { month, deviation: actual - budget, pct: budget > 0 ? ((actual - budget) / budget * 100) : 0 }
   })
 
   return (
@@ -496,10 +511,10 @@ function DeviationsTab() {
           </thead>
           <tbody>
             {MONTHS.map((month, i) => {
-              const budget = METER_BUDGETS.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_budget + mo.transport_budget + mo.tax_budget }, 0)
-              const actual = METER_BUDGETS.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_actual + mo.transport_actual + mo.tax_actual }, 0)
+              const budget = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_budget + mo.transport_budget + mo.tax_budget }, 0) * factor
+              const actual = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_actual + mo.transport_actual + mo.tax_actual }, 0) * factor
               const dev = actual - budget
-              const p = ((dev/budget)*100).toFixed(1)
+              const p = budget > 0 ? ((dev/budget)*100).toFixed(1) : '0'
               return (
                 <tr key={month} className={clsx('border-b border-border-subtle hover:bg-bg-card/50', i%2===0 ? 'bg-[#0d3d4a]/30' : '')}>
                   <td className="tbl-td text-white/70 font-medium">{month}</td>
@@ -849,13 +864,10 @@ function CostReportSidebar({ filters, setFilters }: {
         </div>
       </div>
 
-      {/* Action buttons */}
-      <div className="p-3 border-t border-border-subtle space-y-2">
-        <button className="w-full btn-primary text-xs py-2 flex items-center justify-center gap-1.5">
-          Show report
-        </button>
+      {/* Download */}
+      <div className="p-3 border-t border-border-subtle">
         <button className="w-full btn-secondary text-xs py-2 flex items-center justify-center gap-1.5">
-          <Download size={12} /> Download
+          <Download size={12} /> Download report
         </button>
       </div>
     </aside>
@@ -875,37 +887,37 @@ export default function Financials() {
     <div className="flex flex-col h-full overflow-hidden">
       <Topbar title="Financials" subtitle="Tariffs · budget · projections · deviations" />
 
-      {/* Tabs row — fixed above content */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-0 border-b border-border-subtle">
-        <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-xl p-1 w-fit mb-4">
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className={clsx(
-                'px-4 py-1.5 rounded-lg text-sm font-medium transition-all',
-                tab === t.id ? 'bg-accent text-white shadow' : 'text-white/40 hover:text-white/70'
-              )}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <div className="flex flex-1 overflow-hidden">
+        {/* Persistent filter sidebar */}
+        <CostReportSidebar filters={costFilters} setFilters={setCostFilters} />
 
-      {/* Content area */}
-      {tab === 'cost-report' ? (
-        <div className="flex flex-1 overflow-hidden">
-          <CostReportSidebar filters={costFilters} setFilters={setCostFilters} />
+        {/* Right: tabs + content */}
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {/* Tabs row */}
+          <div className="flex-shrink-0 px-6 pt-4 pb-0 border-b border-border-subtle">
+            <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-xl p-1 w-fit mb-4">
+              {TABS.map(t => (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  className={clsx(
+                    'px-4 py-1.5 rounded-lg text-sm font-medium transition-all',
+                    tab === t.id ? 'bg-accent text-white shadow' : 'text-white/40 hover:text-white/70'
+                  )}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Tab content */}
           <div className="flex-1 overflow-y-auto p-6">
-            <CostReportTab filters={costFilters} setFilters={setCostFilters} />
+            {tab === 'tariffs'     && <TariffsTab />}
+            {tab === 'budget'      && <BudgetTab      filters={costFilters} />}
+            {tab === 'projections' && <ProjectionsTab filters={costFilters} />}
+            {tab === 'deviations'  && <DeviationsTab  filters={costFilters} />}
+            {tab === 'cost-report' && <CostReportTab  filters={costFilters} setFilters={setCostFilters} />}
           </div>
         </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto p-6">
-          {tab === 'tariffs'     && <TariffsTab />}
-          {tab === 'budget'      && <BudgetTab />}
-          {tab === 'projections' && <ProjectionsTab />}
-          {tab === 'deviations'  && <DeviationsTab />}
-        </div>
-      )}
+      </div>
     </div>
   )
 }
