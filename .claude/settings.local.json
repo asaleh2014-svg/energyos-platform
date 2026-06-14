@@ -9,7 +9,9 @@
       "Bash(git commit -m ' *)",
       "mcp__Claude_Preview__preview_start",
       "Bash(npx tsc *)",
-      "Bash(cd /mnt/c/Users/Ahmad/Downloads/energyos-platform/frontend && npx tsc --noEmit 2>&1 | head -60)"
+      "Bash(cd /mnt/c/Users/Ahmad/Downloads/energyos-platform/frontend && npx tsc --noEmit 2>&1 | head -60)",
+      "Skill(run)",
+      "Skill(run:*)"
     ]
   }
 }
