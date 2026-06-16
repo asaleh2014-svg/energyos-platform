@@ -144,6 +144,47 @@ export default function Emissions() {
           </div>
         </div>
 
+        {/* ── Baseline comparison strip ────────────────────────────────── */}
+        <div className="card mb-5 border-purple/20 bg-purple/5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-semibold text-white">Baseline Year Comparison</h3>
+              <p className="text-xs text-white/40 mt-0.5">Progress toward net-zero target · Base: Dec 2018</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-white/30">Base year:</span>
+              <select className="form-select text-xs py-1">
+                <option>Dec 2018</option><option>Dec 2019</option><option>Dec 2020</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-4">
+            {[
+              { label: 'Baseline (2018)',   val: `${(totalCO2 * 1.28).toFixed(0)} tCO₂`, color: '#8b5cf6', sub: 'Reference year' },
+              { label: 'Current (2026)',    val: `${totalCO2.toFixed(0)} tCO₂`,           color: '#3b82f6', sub: 'This year' },
+              { label: 'Reduction vs Base', val: `−${((1 - totalCO2 / (totalCO2 * 1.28)) * 100).toFixed(1)}%`, color: '#10b981', sub: 'Progress toward target' },
+              { label: '2030 Target',       val: `${(totalCO2 * 0.65).toFixed(0)} tCO₂`,  color: '#f59e0b', sub: '−35% vs baseline' },
+            ].map(d => (
+              <div key={d.label} className="bg-bg-card rounded-xl p-3 border border-border-subtle">
+                <div className="text-xs text-white/40 mb-1">{d.label}</div>
+                <div className="text-lg font-semibold" style={{ color: d.color }}>{d.val}</div>
+                <div className="text-[11px] text-white/30 mt-0.5">{d.sub}</div>
+              </div>
+            ))}
+          </div>
+          {/* Progress bar */}
+          <div className="mt-3">
+            <div className="flex justify-between text-[10px] text-white/30 mb-1">
+              <span>0%</span><span>Current: {((1 - totalCO2 / (totalCO2 * 1.28)) * 100).toFixed(1)}% reduction achieved</span><span>Target: 35%</span>
+            </div>
+            <div className="w-full bg-bg-secondary rounded-full h-2 overflow-hidden relative">
+              <div className="h-full rounded-full bg-gradient-to-r from-purple to-accent transition-all"
+                style={{ width: `${Math.min(100, ((1 - totalCO2 / (totalCO2 * 1.28)) / 0.35) * 100).toFixed(0)}%` }} />
+              <div className="absolute top-0 h-full w-0.5 bg-success/60" style={{ left: '100%' }} />
+            </div>
+          </div>
+        </div>
+
         {/* ── View level tabs ─────────────────────────────────────────────── */}
         <div className="flex items-center gap-1 mb-5 bg-bg-secondary border border-border-subtle rounded-xl p-1 w-fit">
           {(['portfolio','city','site','meter'] as ViewLevel[]).map(v => (

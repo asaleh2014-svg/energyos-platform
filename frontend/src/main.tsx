@@ -4,7 +4,9 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppLayout } from '@/components/layout/AppLayout'
 import Dashboard from '@/pages/Dashboard'
+import Portfolio from '@/pages/Portfolio'
 import Analytics from '@/pages/Analytics'
+import MarketInsight from '@/pages/MarketInsight'
 import Connections from '@/pages/Connections'
 import Sites from '@/pages/Sites'
 import SiteDetail from '@/pages/SiteDetail'
@@ -27,20 +29,22 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/"             element={<Dashboard />} />
-            <Route path="/analytics"    element={<Analytics />} />
-            <Route path="/connections"  element={<Connections />} />
-            <Route path="/sites"         element={<Sites />} />
-            <Route path="/sites/:siteId" element={<SiteDetail />} />
-            <Route path="/meters"       element={<Meters />} />
-            <Route path="/emissions"    element={<Emissions />} />
-            <Route path="/co2-forecast" element={<CO2Forecast />} />
-            <Route path="/budget"       element={<Budget />} />
-            <Route path="/financials"   element={<Financials />} />
-            <Route path="/ai"           element={<AIAuditor />} />
-            <Route path="/reports"      element={<Reports />} />
-            <Route path="/invoices"     element={<Invoices />} />
-            <Route path="/settings"     element={<Settings />} />
+            <Route path="/"               element={<Dashboard />} />
+            <Route path="/portfolio"      element={<Portfolio />} />
+            <Route path="/analytics"      element={<Analytics />} />
+            <Route path="/market-insight" element={<MarketInsight />} />
+            <Route path="/connections"    element={<Connections />} />
+            <Route path="/sites"          element={<Sites />} />
+            <Route path="/sites/:siteId"  element={<SiteDetail />} />
+            <Route path="/meters"         element={<Meters />} />
+            <Route path="/emissions"      element={<Emissions />} />
+            <Route path="/co2-forecast"   element={<CO2Forecast />} />
+            <Route path="/budget"         element={<Budget />} />
+            <Route path="/financials"     element={<Financials />} />
+            <Route path="/ai"             element={<AIAuditor />} />
+            <Route path="/reports"        element={<Reports />} />
+            <Route path="/invoices"       element={<Invoices />} />
+            <Route path="/settings"       element={<Settings />} />
           </Route>
         </Routes>
       </BrowserRouter>

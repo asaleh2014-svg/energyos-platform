@@ -4,18 +4,23 @@ import { MARKET_CONFIGS } from '@/types'
 import {
   LayoutDashboard, BarChart3, Zap, Building2, Gauge, Bot,
   FileText, Receipt, Settings, X, Leaf, TrendingDown,
-  DollarSign, PieChart, TrendingUp,
+  DollarSign, PieChart, Globe, Lightbulb, Library, Layers,
 } from 'lucide-react'
 import clsx from 'clsx'
 
 const NAV = [
   { section: 'Overview', items: [
     { to: '/',          icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/analytics', icon: BarChart3,       label: 'Analytics' },
+    { to: '/portfolio', icon: Globe,           label: 'Portfolio Summary' },
   ]},
   { section: 'Assets', items: [
     { to: '/connections', icon: Zap,      label: 'Connections' },
     { to: '/sites',       icon: Building2,label: 'Sites'       },
+    { to: '/meters',      icon: Gauge,    label: 'Meters'      },
+  ]},
+  { section: 'Analytics', items: [
+    { to: '/analytics',      icon: BarChart3, label: 'Account Detail'  },
+    { to: '/market-insight', icon: Lightbulb, label: 'Market Insight'  },
   ]},
   { section: 'Sustainability', items: [
     { to: '/emissions',    icon: Leaf,         label: 'CO₂ Emissions' },
@@ -23,14 +28,13 @@ const NAV = [
   ]},
   { section: 'Financials', items: [
     { to: '/financials', icon: DollarSign, label: 'Tariffs & Budget' },
-    { to: '/budget',     icon: PieChart,   label: 'Budget Detail'    },
+    { to: '/invoices',   icon: Receipt,    label: 'Invoice Manager'  },
   ]},
   { section: 'Intelligence', items: [
-    { to: '/ai',      icon: Bot,      label: 'AI Auditor', badge: 'AI' },
-    { to: '/reports', icon: FileText, label: 'Reports'                  },
+    { to: '/ai',      icon: Bot,     label: 'AI Auditor',    badge: 'AI' },
+    { to: '/reports', icon: Library, label: 'Report Library'             },
   ]},
   { section: 'Admin', items: [
-    { to: '/invoices', icon: Receipt,  label: 'Invoices' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ]},
 ]
