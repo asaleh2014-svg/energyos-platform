@@ -3,7 +3,7 @@ import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS } from '@/types'
 import { supabase, type InvoiceRow } from '@/lib/supabase'
-import { Upload, Bot, Download, Search, CheckSquare, AlertTriangle, Clock, FileText, RefreshCw, X } from 'lucide-react'
+import { Upload, Bot, Download, Search, CheckSquare, AlertTriangle, Clock, FileText, RefreshCw, X, ExternalLink, Eye } from 'lucide-react'
 import clsx from 'clsx'
 
 type PageTab = 'list' | 'schedule' | 'upload'
@@ -27,6 +27,7 @@ export default function Invoices() {
   const [search,       setSearch]       = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [selected,     setSelected]     = useState<Set<string>>(new Set())
+  const [viewing,      setViewing]      = useState<InvoiceRow | null>(null)
 
   // Upload form state
   const fileRef                         = useRef<HTMLInputElement>(null)
@@ -318,7 +319,9 @@ export default function Invoices() {
                             : <span className="text-xs text-white/25">No file</span>}
                         </td>
                         <td className="tbl-td">
-                          <button className="btn-sm">View</button>
+                          <button className="btn-sm flex items-center gap-1" onClick={() => setViewing(inv)}>
+                            <Eye size={10}/> View
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -522,6 +525,121 @@ export default function Invoices() {
         )}
 
       </div>
+
+      {/* ── Invoice detail slide-over ──────────────────────────────────────── */}
+    {viewing && (
+      <div className="fixed inset-0 z-50 flex justify-end">
+        {/* Backdrop */}
+        <div className="absolute inset-0 bg-black/50" onClick={() => setViewing(null)} />
+
+        {/* Panel */}
+        <div className="relative w-full max-w-md bg-bg-primary border-l border-border-subtle flex flex-col shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
+            <div>
+              <div className="text-sm font-semibold text-white flex items-center gap-2">
+                <FileText size={14} className="text-accent" />
+                {viewing.nus_ref ?? 'Invoice Detail'}
+              </div>
+              <div className="text-xs text-white/40 mt-0.5">{viewing.supplier ?? 'Unknown supplier'} · {viewing.doc_type}</div>
+            </div>
+            <button onClick={() => setViewing(null)} className="text-white/30 hover:text-white/60">
+              <X size={18} />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-5">
+
+            {/* Status */}
+            <div className="flex items-center gap-2">
+              <span className={STATUS_STYLE[viewing.status] ?? 'status-pending'}>{viewing.status}</span>
+              <span className="text-xs text-white/30">{new Date(viewing.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+            </div>
+
+            {/* Amounts */}
+            <div className="card bg-bg-secondary">
+              <div className="text-xs text-white/40 mb-3 font-semibold uppercase tracking-wider">Amounts</div>
+              <div className="space-y-2">
+                {[
+                  { label: 'Excl. VAT',  value: viewing.amount_ex_vat },
+                  { label: 'VAT',        value: viewing.vat_amount    },
+                  { label: 'Total',      value: viewing.amount_inc_vat, bold: true },
+                ].map(r => (
+                  <div key={r.label} className={clsx('flex justify-between text-sm', r.bold && 'border-t border-border-subtle pt-2 mt-2')}>
+                    <span className="text-white/50">{r.label}</span>
+                    <span className={clsx('font-mono', r.bold ? 'text-white font-semibold text-base' : 'text-white/80')}>
+                      {r.value != null ? `${cfg.currencySymbol} ${r.value.toLocaleString()}` : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Details */}
+            <div className="card bg-bg-secondary">
+              <div className="text-xs text-white/40 mb-3 font-semibold uppercase tracking-wider">Invoice Details</div>
+              <div className="space-y-2.5 text-sm">
+                {[
+                  { label: 'NUS Reference',     value: viewing.nus_ref },
+                  { label: 'Supplier',          value: viewing.supplier },
+                  { label: 'Document Type',     value: viewing.doc_type },
+                  { label: 'Tax Date',          value: viewing.tax_date },
+                  { label: 'Payment Due',       value: viewing.payment_due },
+                  { label: 'Customer Account',  value: viewing.customer_account },
+                  { label: 'Currency',          value: viewing.currency },
+                ].map(r => (
+                  <div key={r.label} className="flex justify-between gap-4">
+                    <span className="text-white/40 flex-shrink-0">{r.label}</span>
+                    <span className="text-white/80 text-right truncate">{r.value ?? '—'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Notes */}
+            {viewing.notes && (
+              <div className="card bg-bg-secondary">
+                <div className="text-xs text-white/40 mb-2 font-semibold uppercase tracking-wider">Notes / Address</div>
+                <p className="text-xs text-white/60 leading-relaxed">{viewing.notes}</p>
+              </div>
+            )}
+
+            {/* File */}
+            {viewing.file_path && (
+              <div className="card bg-bg-secondary">
+                <div className="text-xs text-white/40 mb-3 font-semibold uppercase tracking-wider">Attached File</div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText size={16} className="text-accent" />
+                    <span className="text-sm text-white/70">{viewing.file_name ?? 'invoice.pdf'}</span>
+                  </div>
+                  <a
+                    href={supabase.storage.from('invoice-files').getPublicUrl(viewing.file_path).data.publicUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-primary flex items-center gap-1 text-xs">
+                    <ExternalLink size={11} /> Open PDF
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer actions */}
+          <div className="flex gap-2 p-4 border-t border-border-subtle">
+            <button className="btn-secondary flex-1 text-xs flex items-center justify-center gap-1">
+              <Download size={12} /> Download
+            </button>
+            <button
+              onClick={() => setViewing(null)}
+              className="btn-secondary flex-1 text-xs">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </div>
   )
 }

@@ -21,7 +21,7 @@ invoicesRouter.post('/extract', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
     const prompt = `You are an energy invoice data extraction assistant.
 Extract the following fields from this utility invoice PDF and return ONLY valid JSON with no markdown:

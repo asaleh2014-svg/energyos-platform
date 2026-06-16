@@ -41,14 +41,18 @@ aiRouter.post('/chat', async (req, res) => {
 
     } else if (provider === 'gemini') {
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '')
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' })
-      const chat = model.startChat({
-        systemInstruction: SYSTEM_PROMPT(market, context),
-        history: messages.slice(0, -1).map((m: { role: string; content: string }) => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
-        })),
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        systemInstruction: { role: 'user', parts: [{ text: SYSTEM_PROMPT(market, context) }] },
       })
+      // Gemini history must alternate user/model and start with user
+      const rawHistory = messages.slice(0, -1).map((m: { role: string; content: string }) => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      }))
+      // Drop leading model turns so history always starts with user
+      while (rawHistory.length > 0 && rawHistory[0].role === 'model') rawHistory.shift()
+      const chat = model.startChat({ history: rawHistory })
       const result = await chat.sendMessage(messages.at(-1).content)
       reply = result.response.text()
 
