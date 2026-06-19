@@ -52,13 +52,35 @@ function siteConsumption(siteId: string, period?: Period) {
   }
 
   const rows: { month: string; elec: number; gas: number }[] = []
+  const now = new Date()
+
+  // Daily granularity (single month)
+  if (period.granularity === 'day') {
+    const dayElec = baseElec / 30
+    const dayGas  = baseGas  / 30
+    const cur = new Date(period.from.getFullYear(), period.from.getMonth(), period.from.getDate())
+    const end = new Date(period.to.getFullYear(),   period.to.getMonth(),   period.to.getDate())
+    let idx = 0
+    while (cur <= end) {
+      const m = cur.getMonth()
+      rows.push({
+        month: `${cur.getDate()} ${MONTH_NAMES_S[m]}`,
+        elec:  Math.round(dayElec * SEASONAL_S[m] * rng(idx)),
+        gas:   Math.round(dayGas  * SEASONAL_S[m] * rng(idx + 13)),
+      })
+      cur.setDate(cur.getDate() + 1)
+      idx++
+    }
+    return rows
+  }
+
+  // Monthly granularity
   const cur = new Date(period.from.getFullYear(), period.from.getMonth(), 1)
   const end = new Date(period.to.getFullYear(),   period.to.getMonth(),   1)
   let idx = 0
   while (cur <= end) {
     const m  = cur.getMonth()
     const yr = cur.getFullYear()
-    const now = new Date()
     const label = `${MONTH_NAMES_S[m]}${yr !== now.getFullYear() ? ` ${yr}` : ''}`
     rows.push({
       month: label,
@@ -154,9 +176,9 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => { onClose(); navigate(`/sites/${site.id}`) }}
+            <button onClick={() => { onClose(); navigate(`/buildings?site=${site.id}`) }}
               className="btn-secondary text-xs flex items-center gap-1">
-              <ExternalLink size={11} /> Full detail
+              <ExternalLink size={11} /> View buildings
             </button>
             <button onClick={onClose} className="text-white/30 hover:text-white/60"><X size={18} /></button>
           </div>

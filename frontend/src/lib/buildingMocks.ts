@@ -100,6 +100,28 @@ export function buildingMonthly(b: MockBuilding, period?: Period) {
 
   const rows: { month: string; elec: number; gas: number }[] = []
   const now = new Date()
+
+  // Daily granularity (single month selected)
+  if (period.granularity === 'day') {
+    const dayElec = baseElec / 30
+    const dayGas  = baseGas  / 30
+    const cur = new Date(period.from.getFullYear(), period.from.getMonth(), period.from.getDate())
+    const end = new Date(period.to.getFullYear(),   period.to.getMonth(),   period.to.getDate())
+    let idx = 0
+    while (cur <= end) {
+      const m = cur.getMonth()
+      rows.push({
+        month: `${cur.getDate()} ${MN[m]}`,
+        elec:  Math.round(dayElec * SEASONAL_B[m] * rng(idx)),
+        gas:   Math.round(dayGas  * SEASONAL_B[m] * rng(idx + 13)),
+      })
+      cur.setDate(cur.getDate() + 1)
+      idx++
+    }
+    return rows
+  }
+
+  // Monthly granularity
   const cur = new Date(period.from.getFullYear(), period.from.getMonth(), 1)
   const end = new Date(period.to.getFullYear(),   period.to.getMonth(),   1)
   let idx = 0

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Calendar, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -46,7 +47,7 @@ export function buildPeriod(preset: PeriodPreset, customFrom?: Date, customTo?: 
       return { preset, from: startOfDay(now), to: endOfDay(now), label: 'Today', granularity: 'day' }
     case 'this_month':
       return { preset, from: startOfMonth(now), to: endOfMonth(now),
-        label: now.toLocaleDateString('en-GB',{month:'long',year:'numeric'}), granularity: 'month' }
+        label: now.toLocaleDateString('en-GB',{month:'long',year:'numeric'}), granularity: 'day' }
     case 'this_quarter':
       return { preset, from: startOfQuarter(now), to: endOfQuarter(now),
         label: quarterLabel(now), granularity: 'quarter' }
@@ -98,15 +99,29 @@ export function PeriodSelector({ value, onChange, compact = false }: Props) {
   const [tab,  setTab]  = useState<'preset'|'month'|'quarter'|'year'|'custom'>('preset')
   const [customFrom, setCustomFrom] = useState<string>('')
   const [customTo,   setCustomTo]   = useState<string>('')
-  const ref = useRef<HTMLDivElement>(null)
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null)
+  const triggerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) {
+        // also allow clicks inside the portal dropdown
+        const portal = document.getElementById('period-selector-portal')
+        if (portal && portal.contains(e.target as Node)) return
+        setOpen(false)
+      }
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
+
+  function toggleOpen() {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect()
+      setDropdownPos({ top: rect.bottom + 6, left: rect.right - 300 })
+    }
+    setOpen(o => !o)
+  }
 
   function applyPreset(key: PeriodPreset) {
     onChange(buildPeriod(key))
@@ -119,24 +134,11 @@ export function PeriodSelector({ value, onChange, compact = false }: Props) {
     setOpen(false)
   }
 
-  return (
-    <div ref={ref} className="relative">
-      {/* Trigger */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        className={clsx(
-          'flex items-center gap-1.5 text-xs border border-border-default rounded-lg px-2.5 py-1.5 transition-colors',
-          open ? 'border-accent text-white bg-accent/10' : 'text-white/60 hover:text-white hover:border-white/30'
-        )}
-      >
-        <Calendar size={11} />
-        <span className="font-medium">{value.label}</span>
-        <ChevronDown size={10} className={clsx('transition-transform', open && 'rotate-180')} />
-      </button>
-
-      {/* Dropdown */}
-      {open && (
-        <div className="absolute right-0 top-full mt-1.5 w-[300px] bg-bg-secondary border border-border-subtle rounded-xl shadow-2xl z-50 overflow-hidden">
+  const dropdown = open && dropdownPos ? createPortal(
+    <div
+      id="period-selector-portal"
+      style={{ position: 'fixed', top: dropdownPos.top, left: Math.max(8, dropdownPos.left), zIndex: 9999, width: 300 }}
+      className="bg-bg-secondary border border-border-subtle rounded-xl shadow-2xl overflow-hidden">
 
           {/* Tab strip */}
           <div className="flex border-b border-border-subtle">
@@ -214,8 +216,25 @@ export function PeriodSelector({ value, onChange, compact = false }: Props) {
             )}
 
           </div>
-        </div>
-      )}
+        </div>,
+    document.body
+  ) : null
+
+  return (
+    <div ref={triggerRef} className="relative">
+      {/* Trigger */}
+      <button
+        onClick={toggleOpen}
+        className={clsx(
+          'flex items-center gap-1.5 text-xs border border-border-default rounded-lg px-2.5 py-1.5 transition-colors',
+          open ? 'border-accent text-white bg-accent/10' : 'text-white/60 hover:text-white hover:border-white/30'
+        )}
+      >
+        <Calendar size={11} />
+        <span className="font-medium">{value.label}</span>
+        <ChevronDown size={10} className={clsx('transition-transform', open && 'rotate-180')} />
+      </button>
+      {dropdown}
     </div>
   )
 }
@@ -242,7 +261,7 @@ function MonthPicker({ value, onChange }: { value: Period; onChange: (p: Period)
             <button key={m}
               onClick={() => onChange({ preset:'this_month', from, to,
                 label: from.toLocaleDateString('en-GB',{month:'long',year:'numeric'}),
-                granularity:'month' })}
+                granularity:'day' })}
               className={clsx('text-[11px] py-1.5 rounded-lg border transition-colors',
                 active ? 'bg-accent border-accent text-white'
                        : 'border-border-subtle text-white/60 hover:text-white hover:border-white/30')}>

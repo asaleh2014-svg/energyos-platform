@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
 import {
   Hotel, MapPin, Zap, Flame, Leaf, Award, ChevronRight,
@@ -70,7 +70,6 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: 'Total Area', value: `${building.area_m2.toLocaleString()} m²`, icon: Building2, color: '#3b82f6' },
-              { label: 'Floors',     value: String(building.floors),                    icon: Hotel,     color: '#8b5cf6' },
               { label: 'Year Built', value: String(building.year_built),                icon: Award,     color: '#f59e0b' },
               { label: 'Occupancy',  value: `${building.occupancy_pct}%`,               icon: Users,     color: '#10b981' },
             ].map(({ label, value, icon: Icon, color }) => (
@@ -224,8 +223,13 @@ function BuildingRow({ building }: { building: MockBuilding }) {
 function BuildingList() {
   const [search, setSearch] = useState('')
   const [labelFilter, setLabelFilter] = useState<EnergyLabel | ''>('')
+  const [searchParams] = useSearchParams()
+  const siteFilter = searchParams.get('site')
 
-  const allBuildings = MOCK_SITE_IDS.flatMap(sid => mockBuildingsForSite(sid, 3))
+  const allBuildings = siteFilter
+    ? mockBuildingsForSite(siteFilter, 3)
+    : MOCK_SITE_IDS.flatMap(sid => mockBuildingsForSite(sid, 3))
+
   const filtered = allBuildings.filter(b => {
     const q = search.toLowerCase()
     return (!q || b.name.toLowerCase().includes(q) || b.address.toLowerCase().includes(q))
