@@ -1,14 +1,15 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   X, ChevronDown, ChevronRight, Edit2, Maximize2, Printer,
   History, Zap, Flame, Droplets, Download, ExternalLink,
   Activity, FileText, MapPin, AlertCircle, Table,
 } from 'lucide-react'
 import { UnitSelect } from '@/components/UnitSelect'
+import { PeriodSelector, DEFAULT_PERIOD, type Period } from '@/components/PeriodSelector'
 import clsx from 'clsx'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend,
+  ResponsiveContainer,
 } from 'recharts'
 import type { FullConnection } from '@/lib/connectionsData'
 
@@ -20,48 +21,80 @@ const PRODUCT_COLOR: Record<string, string> = {
   Water:       '#3b82f6',
 }
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const SEASONAL    = [1.12,1.08,1.0,0.92,0.85,0.82,0.84,0.86,0.93,1.0,1.06,1.10]
 
-function makeConsumptionData(conn: FullConnection) {
-  const isElec = conn.product === 'Electricity'
-  const base = isElec
-    ? (conn.usage_normal + conn.usage_low) / 12
-    : conn.usage_normal / 12
-  if (base === 0) return MONTHS.map(m => ({
-    month: m, peak: 0, offpeak: 0, actual: 0, forecast: 0,
-  }))
-
-  // Seasonal shape — higher in winter (UAE: higher in summer for cooling)
-  const variance = [1.12, 1.08, 1.0, 0.92, 0.85, 0.82, 0.84, 0.86, 0.93, 1.0, 1.06, 1.10]
-
-  // Seeded random so values don't jump on re-render
+function seedRng(conn: FullConnection) {
   const seed = (conn.ean_code ?? '').split('').reduce((a, c) => a + c.charCodeAt(0), 0)
-  const rng = (i: number) => 0.88 + ((seed * (i + 1) * 9301 + 49297) % 233280) / 233280 * 0.24
+  return (i: number) => 0.88 + ((seed * (i + 1) * 9301 + 49297) % 233280) / 233280 * 0.24
+}
 
-  // Build 12 months of actuals (only up to current month; rest = null = forecast)
-  const NOW_MONTH = 5 // June = index 5 (today = 2026-06-17, so Jan–May actuals, Jun+ forecast)
+function makeConsumptionData(conn: FullConnection, period: Period) {
+  const isElec   = conn.product === 'Electricity'
+  const annualKwh = isElec ? conn.usage_normal + conn.usage_low : conn.usage_normal
+  const rng       = seedRng(conn)
+  const now       = new Date()
 
-  const rows = MONTHS.map((m, i) => {
-    const shaped = base * variance[i]
-    const actualTotal = Math.round(shaped * rng(i))
-    const peak    = Math.round(actualTotal * 0.62) // ~62% peak tariff hours
-    const offpeak = actualTotal - peak
-
-    // Simple linear-trend forecast: average of last 3 actuals × seasonal factor
-    // For display, we use the shaped value with slight uptrend
-    const forecastTotal = Math.round(shaped * 1.03) // 3% growth trend
-
-    if (i < NOW_MONTH) {
-      return isElec
-        ? { month: m, peak, offpeak, forecast: null }
-        : { month: m, actual: actualTotal, forecast: null }
-    } else {
-      return isElec
-        ? { month: m, peak: null, offpeak: null, forecast: forecastTotal }
-        : { month: m, actual: null, forecast: forecastTotal }
+  // ── Monthly granularity (default, last-12m, custom spanning months) ──────
+  if (period.granularity === 'month' || period.granularity === 'quarter') {
+    // Enumerate months in range
+    const rows: { label: string; peak: number|null; offpeak: number|null; actual: number|null; forecast: number|null }[] = []
+    const cur = new Date(period.from.getFullYear(), period.from.getMonth(), 1)
+    const end = new Date(period.to.getFullYear(),   period.to.getMonth(),   1)
+    let idx = 0
+    while (cur <= end) {
+      const m   = cur.getMonth()
+      const yr  = cur.getFullYear()
+      const base = (annualKwh / 12) * SEASONAL[m]
+      const isFuture = cur > now
+      const label = `${MONTH_NAMES[m]} ${yr !== now.getFullYear() ? yr : ''}`
+      const actualTotal  = Math.round(base * rng(idx))
+      const forecastTotal = Math.round(base * 1.03)
+      const peak    = Math.round(actualTotal * 0.62)
+      const offpeak = actualTotal - peak
+      rows.push(isFuture
+        ? { label: label.trim(), peak: null, offpeak: null, actual: null, forecast: forecastTotal }
+        : { label: label.trim(), peak, offpeak, actual: actualTotal, forecast: null })
+      cur.setMonth(cur.getMonth() + 1)
+      idx++
     }
-  })
+    return rows
+  }
 
+  // ── Daily granularity (today / short custom range) ────────────────────────
+  if (period.granularity === 'day') {
+    const rows: { label: string; peak: number|null; offpeak: number|null; actual: number|null; forecast: number|null }[] = []
+    const dayBase = annualKwh / 365
+    const cur = new Date(period.from)
+    let idx = 0
+    while (cur <= period.to) {
+      const isFuture = cur > now
+      const label = `${cur.getDate()} ${MONTH_NAMES[cur.getMonth()]}`
+      const actualTotal   = Math.round(dayBase * SEASONAL[cur.getMonth()] * rng(idx) * 30)
+      const forecastTotal = Math.round(dayBase * SEASONAL[cur.getMonth()] * 1.03 * 30)
+      const peak    = Math.round(actualTotal * 0.62)
+      const offpeak = actualTotal - peak
+      rows.push(isFuture
+        ? { label, peak: null, offpeak: null, actual: null, forecast: forecastTotal }
+        : { label, peak, offpeak, actual: actualTotal, forecast: null })
+      cur.setDate(cur.getDate() + 1)
+      idx++
+    }
+    return rows
+  }
+
+  // ── Yearly granularity ────────────────────────────────────────────────────
+  const rows: { label: string; peak: number|null; offpeak: number|null; actual: number|null; forecast: number|null }[] = []
+  for (let yr = period.from.getFullYear(); yr <= period.to.getFullYear(); yr++) {
+    const isFuture = yr > now.getFullYear()
+    const total     = Math.round(annualKwh * rng(yr - 2020))
+    const forecast  = Math.round(annualKwh * 1.03)
+    const peak    = Math.round(total * 0.62)
+    const offpeak = total - peak
+    rows.push(isFuture
+      ? { label: String(yr), peak: null, offpeak: null, actual: null, forecast }
+      : { label: String(yr), peak, offpeak, actual: total, forecast: null })
+  }
   return rows
 }
 
@@ -345,22 +378,18 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
   const statusLog = makeStatusLog(conn)
   const [energyUnit, setEnergyUnit] = useState<'kWh' | 'MWh'>('kWh')
   const [showTable,  setShowTable]  = useState(false)
+  const [period,     setPeriod]     = useState<Period>(DEFAULT_PERIOD)
 
   const isElec = conn.product === 'Electricity'
   const baseUnit = isElec ? 'kWh' : conn.product === 'Gas' ? 'm³' : 'm³'
   const unit = isElec ? energyUnit : baseUnit
 
-  const rawData = makeConsumptionData(conn)
+  const rawData = useMemo(() => makeConsumptionData(conn, period), [conn, period])
   const chartData = rawData.map(row => {
     if (!isElec || energyUnit === 'kWh') return row
-    // Convert to MWh
-    return {
-      ...row,
-      peak:     row.peak     != null ? parseFloat((row.peak / 1000).toFixed(3))     : null,
-      offpeak:  row.offpeak  != null ? parseFloat((row.offpeak / 1000).toFixed(3))  : null,
-      forecast: row.forecast != null ? parseFloat((row.forecast / 1000).toFixed(3)) : null,
-      actual:   (row as any).actual != null ? parseFloat(((row as any).actual / 1000).toFixed(3)) : null,
-    }
+    const scale = (v: number | null) => v != null ? parseFloat((v / 1000).toFixed(3)) : null
+    return { ...row, peak: scale(row.peak), offpeak: scale(row.offpeak),
+      forecast: scale(row.forecast), actual: scale(row.actual) }
   })
 
   const ProductIcon = conn.product === 'Electricity' ? Zap
@@ -562,13 +591,14 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
               </div>
             </div>
 
-            {/* 12-month consumption chart */}
+            {/* Consumption chart */}
             <div>
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <Activity size={13} className="text-accent" />
                 <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">
-                  Consumption Last 12 Months ({unit})
+                  Consumption ({unit})
                 </h3>
+                <PeriodSelector value={period} onChange={setPeriod} />
                 {isElec && <UnitSelect value={energyUnit} onChange={setEnergyUnit} />}
                 <button onClick={() => setShowTable(v => !v)}
                   className="flex items-center gap-1 text-[11px] text-white/40 hover:text-white/60 border border-border-subtle px-2 py-0.5 rounded-lg transition-colors">
@@ -591,7 +621,7 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
                 <ResponsiveContainer width="100%" height={200}>
                   <BarChart data={chartData} barCategoryGap="25%" barGap={0}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1a3d47" vertical={false} />
-                    <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#6b8fa3' }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#6b8fa3' }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 10, fill: '#6b8fa3' }} axisLine={false} tickLine={false}
                       tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
                     <Tooltip
@@ -625,7 +655,7 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
                 <table className="w-full text-[11px]">
                   <thead>
                     <tr className="border-b border-border-subtle bg-bg-secondary">
-                      <th className="tbl-th">Month</th>
+                      <th className="tbl-th">Period</th>
                       {isElec && <th className="tbl-th text-right">Peak ({unit})</th>}
                       {isElec && <th className="tbl-th text-right">Off-peak ({unit})</th>}
                       {isElec && <th className="tbl-th text-right">Total ({unit})</th>}
@@ -636,13 +666,13 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
                   </thead>
                   <tbody>
                     {chartData.map((row, i) => {
-                      const isPast = isElec ? row.peak != null : (row as any).actual != null
+                      const isPast = isElec ? row.peak != null : row.actual != null
                       const total = isElec && row.peak != null
                         ? (row.peak + (row.offpeak ?? 0))
                         : null
                       return (
                         <tr key={i} className={clsx('tbl-row', !isPast && 'opacity-60')}>
-                          <td className="tbl-td font-medium text-white/70">{MONTHS[i]}</td>
+                          <td className="tbl-td font-medium text-white/70">{row.label}</td>
                           {isElec && (
                             <>
                               <td className="tbl-td text-right font-mono text-green-300">
@@ -658,7 +688,7 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
                           )}
                           {!isElec && (
                             <td className="tbl-td text-right font-mono text-white">
-                              {(row as any).actual != null ? (row as any).actual.toLocaleString() : '—'}
+                              {row.actual != null ? row.actual.toLocaleString() : '—'}
                             </td>
                           )}
                           <td className="tbl-td text-right font-mono text-white/40">

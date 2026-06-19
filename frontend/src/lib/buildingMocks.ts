@@ -1,4 +1,8 @@
 import { MONTHS } from '@/lib/mockData'
+import type { Period } from '@/components/PeriodSelector'
+
+const MN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const SEASONAL_B = [1.12,1.08,1.0,0.92,0.85,0.82,0.84,0.86,0.93,1.0,1.06,1.10]
 
 const ENERGY_LABELS = ['A++', 'A+', 'A', 'B', 'C', 'D', 'E', 'F', 'G'] as const
 export type EnergyLabel = typeof ENERGY_LABELS[number]
@@ -80,15 +84,36 @@ export function mockBuildingsForSite(siteId: string, count = 3): MockBuilding[] 
   })
 }
 
-export function buildingMonthly(b: MockBuilding) {
+export function buildingMonthly(b: MockBuilding, period?: Period) {
   const seed = b.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
-  const seasonal = [1.12,1.08,1.0,0.92,0.85,0.82,0.84,0.86,0.93,1.0,1.06,1.10]
   const rng = (i: number) => 0.90 + ((seed * (i+1) * 9301 + 49297) % 233280) / 233280 * 0.20
   const baseElec = b.elec_kwh_year / 12
   const baseGas  = b.gas_m3_year  / 12
-  return MONTHS.map((m, i) => ({
-    month: m,
-    elec:  Math.round(baseElec * seasonal[i] * rng(i)),
-    gas:   Math.round(baseGas  * seasonal[i] * rng(i + 13)),
-  }))
+
+  if (!period) {
+    return MONTHS.map((m, i) => ({
+      month: m,
+      elec: Math.round(baseElec * SEASONAL_B[i] * rng(i)),
+      gas:  Math.round(baseGas  * SEASONAL_B[i] * rng(i + 13)),
+    }))
+  }
+
+  const rows: { month: string; elec: number; gas: number }[] = []
+  const now = new Date()
+  const cur = new Date(period.from.getFullYear(), period.from.getMonth(), 1)
+  const end = new Date(period.to.getFullYear(),   period.to.getMonth(),   1)
+  let idx = 0
+  while (cur <= end) {
+    const m  = cur.getMonth()
+    const yr = cur.getFullYear()
+    const label = `${MN[m]}${yr !== now.getFullYear() ? ` ${yr}` : ''}`
+    rows.push({
+      month: label,
+      elec:  Math.round(baseElec * SEASONAL_B[m] * rng(idx)),
+      gas:   Math.round(baseGas  * SEASONAL_B[m] * rng(idx + 13)),
+    })
+    cur.setMonth(cur.getMonth() + 1)
+    idx++
+  }
+  return rows
 }

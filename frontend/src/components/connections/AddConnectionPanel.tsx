@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { X, ChevronDown, ChevronRight, Plus } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { X, ChevronDown, ChevronRight, Plus, Leaf, RotateCcw } from 'lucide-react'
 import clsx from 'clsx'
 import type { FullConnection } from '@/lib/connectionsData'
 import {
@@ -7,6 +7,10 @@ import {
   CONN_TYPES, DEPARTMENTS, BUILDINGS, MARKET_SEGS, MONITORINGS,
   CHARACTERISTICS, USAGE_CATS, TAX_CLUSTERS, CLIENTS,
 } from '@/lib/connectionsData'
+import {
+  type EnergyMix, resolveConnectionMix, MIX_LABELS, MIX_COLORS,
+  mixEmissionFactor, cityMix,
+} from '@/lib/energyMix'
 
 // ─── Form field components ─────────────────────────────────────────────────────
 
@@ -76,7 +80,9 @@ function Section({ title, defaultOpen = true, children }: {
 
 // ─── Empty form state ──────────────────────────────────────────────────────────
 
-type FormData = Omit<FullConnection, 'id' | 'latitude' | 'longitude'>
+type FormData = Omit<FullConnection, 'id' | 'latitude' | 'longitude'> & {
+  mix_override: EnergyMix | null
+}
 
 const EMPTY: FormData = {
   product: 'Electricity', client: '', department: '', name: '', ean_code: '',
@@ -91,6 +97,7 @@ const EMPTY: FormData = {
   monitoring_type: '', monitoring_start: '', data_available: '', tax_cluster_label: '',
   rubricering: '', costs: '', gps: '', meter_number: '', meter_install: '',
   reading_normal: 0, reading_low: 0, reading_date: '', remarks: '',
+  mix_override: null,
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
@@ -106,10 +113,28 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
   const f = <K extends keyof FormData>(key: K) => (val: FormData[K]) =>
     setForm(prev => ({ ...prev, [key]: val }))
 
+  // Auto-resolve mix when city changes and no manual override
+  const resolved = resolveConnectionMix({
+    connectionMixOverride: form.mix_override,
+    city: form.city || undefined,
+  })
+  const activeMix = resolved.mix
+
+  // When city is filled in and no override exists, sync city mix into preview
+  useEffect(() => {
+    if (!form.mix_override && form.city) {
+      // no-op: resolved is computed above reactively
+    }
+  }, [form.city, form.mix_override])
+
+  const emissionFactor = mixEmissionFactor(activeMix)
+  const annualCO2 = ((form.usage_normal + form.usage_low) * emissionFactor / 1000).toFixed(1)
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    const { mix_override, ...rest } = form
     const newConn: FullConnection = {
-      ...form,
+      ...rest,
       id: `conn-${Date.now()}`,
       latitude: 25.2048,
       longitude: 55.2708,
@@ -351,6 +376,74 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
             <Row label="Costs">
               <TInput value={form.costs} onChange={f('costs')} placeholder="e.g. Own contract" />
             </Row>
+          </Section>
+
+          <Section title="Energy Mix & CO₂" defaultOpen={false}>
+            {/* Resolved source banner */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-1.5 text-[10px] text-white/40">
+                <Leaf size={10} className="text-green-400" />
+                <span>Source: <span className="text-accent-hover">{resolved.label}</span></span>
+              </div>
+              {form.mix_override && (
+                <button type="button"
+                  onClick={() => f('mix_override')(null)}
+                  className="flex items-center gap-1 text-[10px] text-white/40 hover:text-accent-hover transition-colors">
+                  <RotateCcw size={9} /> Reset to default
+                </button>
+              )}
+            </div>
+
+            {/* Mix sliders */}
+            {(Object.keys(MIX_LABELS) as (keyof EnergyMix)[]).map(key => {
+              const val = activeMix[key]
+              const isOverride = !!form.mix_override
+              return (
+                <div key={key} className="mb-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-white/50">{MIX_LABELS[key]}</span>
+                    <span className="text-[10px] font-mono text-white/70">{val}%</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all"
+                        style={{ width: `${val}%`, background: MIX_COLORS[key] }} />
+                    </div>
+                    <input type="range" min={0} max={100} value={val}
+                      onChange={e => {
+                        const newMix = { ...(form.mix_override ?? activeMix), [key]: Number(e.target.value) }
+                        f('mix_override')(newMix)
+                      }}
+                      className="w-20 accent-accent cursor-pointer"
+                    />
+                  </div>
+                  {!isOverride && (
+                    <div className="text-[9px] text-white/20 mt-0.5">Click slider to override</div>
+                  )}
+                </div>
+              )
+            })}
+
+            {/* CO2 preview */}
+            <div className="mt-4 bg-bg-card rounded-xl p-3 border border-border-subtle">
+              <div className="text-[10px] text-white/40 mb-2 uppercase tracking-widest">CO₂ Estimate</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[10px] text-white/35 mb-0.5">Emission factor</div>
+                  <div className="text-sm font-bold text-white">
+                    {(emissionFactor * 1000).toFixed(0)}
+                    <span className="text-[10px] font-normal text-white/40 ml-1">gCO₂/kWh</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-white/35 mb-0.5">Est. annual CO₂</div>
+                  <div className="text-sm font-bold text-green-400">
+                    {form.usage_normal + form.usage_low > 0 ? annualCO2 : '—'}
+                    <span className="text-[10px] font-normal text-white/40 ml-1">tCO₂/yr</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </Section>
 
           <Section title="Comments" defaultOpen={false}>

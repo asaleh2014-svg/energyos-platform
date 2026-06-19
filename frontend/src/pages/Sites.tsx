@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
@@ -15,6 +15,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import { mockBuildingsForSite, LABEL_COLORS } from '@/lib/buildingMocks'
+import { PeriodSelector, DEFAULT_PERIOD, type Period } from '@/components/PeriodSelector'
 import clsx from 'clsx'
 
 // ── Energy mix helpers ─────────────────────────────────────────────────────────
@@ -32,19 +33,42 @@ function calcEmissionFactor(mix: ElecSource) {
   )
 }
 
-// ── Seeded mock consumption per site (prev year + monthly) ─────────────────────
-function siteConsumption(siteId: string) {
+const MONTH_NAMES_S = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const SEASONAL_S    = [1.12,1.08,1.0,0.92,0.85,0.82,0.84,0.86,0.93,1.0,1.06,1.10]
+
+// ── Seeded mock consumption per site (period-aware) ────────────────────────────
+function siteConsumption(siteId: string, period?: Period) {
   const seed = siteId.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
   const baseElec = 8000 + (seed % 12000)   // kWh/month
   const baseGas  = 200  + (seed % 800)     // m³/month
-  const seasonal = [1.12,1.08,1.0,0.92,0.85,0.82,0.84,0.86,0.93,1.0,1.06,1.10]
   const rng = (i: number) => 0.90 + ((seed * (i+1) * 9301 + 49297) % 233280) / 233280 * 0.20
 
-  return MONTHS.map((m, i) => ({
-    month: m,
-    elec:  Math.round(baseElec * seasonal[i] * rng(i)),
-    gas:   Math.round(baseGas  * seasonal[i] * rng(i + 13)),
-  }))
+  if (!period) {
+    return MONTH_NAMES_S.map((m, i) => ({
+      month: m,
+      elec: Math.round(baseElec * SEASONAL_S[i] * rng(i)),
+      gas:  Math.round(baseGas  * SEASONAL_S[i] * rng(i + 13)),
+    }))
+  }
+
+  const rows: { month: string; elec: number; gas: number }[] = []
+  const cur = new Date(period.from.getFullYear(), period.from.getMonth(), 1)
+  const end = new Date(period.to.getFullYear(),   period.to.getMonth(),   1)
+  let idx = 0
+  while (cur <= end) {
+    const m  = cur.getMonth()
+    const yr = cur.getFullYear()
+    const now = new Date()
+    const label = `${MONTH_NAMES_S[m]}${yr !== now.getFullYear() ? ` ${yr}` : ''}`
+    rows.push({
+      month: label,
+      elec: Math.round(baseElec * SEASONAL_S[m] * rng(idx)),
+      gas:  Math.round(baseGas  * SEASONAL_S[m] * rng(idx + 13)),
+    })
+    cur.setMonth(cur.getMonth() + 1)
+    idx++
+  }
+  return rows
 }
 
 function prevYearTotals(siteId: string) {
@@ -86,6 +110,7 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
 
   const [mix, setMix] = useState<ElecSource>(siteMixes[site.id] ?? DEFAULT_MIX)
   const [applied, setApplied] = useState<null | 'site' | 'city'>(null)
+  const [period, setPeriod] = useState<Period>(DEFAULT_PERIOD)
 
   const factor = calcEmissionFactor(mix)
   const factorColor = factor < 0.15 ? '#10b981' : factor < 0.35 ? '#f59e0b' : '#ef4444'
@@ -107,7 +132,7 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
     setApplied('city')
   }
 
-  const consumption = siteConsumption(site.id)
+  const consumption = useMemo(() => siteConsumption(site.id, period), [site.id, period])
   const totals = prevYearTotals(site.id)
 
   const TT = { background: '#0d2b35', border: '1px solid #1a5568', borderRadius: 8, fontSize: 11 }
@@ -159,9 +184,12 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
             </div>
           </div>
 
-          {/* Monthly consumption chart */}
+          {/* Consumption chart */}
           <div>
-            <div className="text-xs font-semibold text-white/50 uppercase tracking-widest mb-2">Monthly Consumption</div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-semibold text-white/50 uppercase tracking-widest">Consumption</span>
+              <PeriodSelector value={period} onChange={setPeriod} />
+            </div>
             <div className="card p-3">
               <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={consumption} barGap={2} barCategoryGap="25%">

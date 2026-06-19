@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
 import {
@@ -14,6 +14,7 @@ import {
   mockBuildingsForSite, buildingMonthly,
   LABEL_COLORS, ENERGY_LABELS, type MockBuilding, type EnergyLabel,
 } from '@/lib/buildingMocks'
+import { PeriodSelector, DEFAULT_PERIOD, type Period } from '@/components/PeriodSelector'
 
 const MOCK_SITE_IDS = [
   'site-abu-dhabi-1', 'site-abu-dhabi-2', 'site-abu-dhabi-3',
@@ -32,7 +33,8 @@ function LabelBadge({ label }: { label: EnergyLabel }) {
 
 function BuildingDetail({ building }: { building: MockBuilding }) {
   const navigate = useNavigate()
-  const monthly  = buildingMonthly(building)
+  const [period, setPeriod] = useState<Period>(DEFAULT_PERIOD)
+  const monthly  = useMemo(() => buildingMonthly(building, period), [building, period])
   const eff      = (building.elec_kwh_year / building.area_m2).toFixed(1)
   const co2      = (building.elec_kwh_year * 0.233 / 1000).toFixed(1)
   const TT = { background: '#0d2b35', border: '1px solid #1a5568', borderRadius: 8, fontSize: 11 }
@@ -128,7 +130,10 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
         </div>
 
         <div className="card">
-          <div className="text-xs font-semibold text-white/50 uppercase tracking-widest mb-4">Monthly Consumption</div>
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-xs font-semibold text-white/50 uppercase tracking-widest">Consumption</span>
+            <PeriodSelector value={period} onChange={setPeriod} />
+          </div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={monthly} barGap={2} barCategoryGap="30%">
               <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" vertical={false} />
