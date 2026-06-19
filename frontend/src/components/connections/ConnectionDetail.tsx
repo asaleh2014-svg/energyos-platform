@@ -2,8 +2,9 @@ import { useState } from 'react'
 import {
   X, ChevronDown, ChevronRight, Edit2, Maximize2, Printer,
   History, Zap, Flame, Droplets, Download, ExternalLink,
-  Activity, FileText, MapPin, AlertCircle,
+  Activity, FileText, MapPin, AlertCircle, Table,
 } from 'lucide-react'
+import { UnitSelect } from '@/components/UnitSelect'
 import clsx from 'clsx'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -22,19 +23,46 @@ const PRODUCT_COLOR: Record<string, string> = {
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
 function makeConsumptionData(conn: FullConnection) {
-  // Generate realistic 12-month bar chart data
-  const base = conn.product === 'Electricity'
+  const isElec = conn.product === 'Electricity'
+  const base = isElec
     ? (conn.usage_normal + conn.usage_low) / 12
-    : conn.product === 'Gas'
-      ? conn.usage_normal / 12
-      : conn.usage_normal / 12
-  if (base === 0) return MONTHS.map(m => ({ month: m, target: 0, actual: 0 }))
-  const variance = [1.12, 1.08, 1.0, 0.92, 0.85, 0.82, 0.84, 0.86, 0.93, 1.0, 1.06, 1.10]
-  return MONTHS.map((m, i) => ({
-    month: m,
-    target: Math.round(base * variance[i]),
-    actual: Math.round(base * variance[i] * (0.88 + Math.random() * 0.24)),
+    : conn.usage_normal / 12
+  if (base === 0) return MONTHS.map(m => ({
+    month: m, peak: 0, offpeak: 0, actual: 0, forecast: 0,
   }))
+
+  // Seasonal shape — higher in winter (UAE: higher in summer for cooling)
+  const variance = [1.12, 1.08, 1.0, 0.92, 0.85, 0.82, 0.84, 0.86, 0.93, 1.0, 1.06, 1.10]
+
+  // Seeded random so values don't jump on re-render
+  const seed = (conn.ean_code ?? '').split('').reduce((a, c) => a + c.charCodeAt(0), 0)
+  const rng = (i: number) => 0.88 + ((seed * (i + 1) * 9301 + 49297) % 233280) / 233280 * 0.24
+
+  // Build 12 months of actuals (only up to current month; rest = null = forecast)
+  const NOW_MONTH = 5 // June = index 5 (today = 2026-06-17, so Jan–May actuals, Jun+ forecast)
+
+  const rows = MONTHS.map((m, i) => {
+    const shaped = base * variance[i]
+    const actualTotal = Math.round(shaped * rng(i))
+    const peak    = Math.round(actualTotal * 0.62) // ~62% peak tariff hours
+    const offpeak = actualTotal - peak
+
+    // Simple linear-trend forecast: average of last 3 actuals × seasonal factor
+    // For display, we use the shaped value with slight uptrend
+    const forecastTotal = Math.round(shaped * 1.03) // 3% growth trend
+
+    if (i < NOW_MONTH) {
+      return isElec
+        ? { month: m, peak, offpeak, forecast: null }
+        : { month: m, actual: actualTotal, forecast: null }
+    } else {
+      return isElec
+        ? { month: m, peak: null, offpeak: null, forecast: forecastTotal }
+        : { month: m, actual: null, forecast: forecastTotal }
+    }
+  })
+
+  return rows
 }
 
 function makeCapacityLog() {
@@ -313,14 +341,30 @@ interface Props {
 
 export default function ConnectionDetail({ conn, onClose }: Props) {
   const color = PRODUCT_COLOR[conn.product] ?? '#6b7280'
-  const chartData = makeConsumptionData(conn)
   const capacityLog = makeCapacityLog()
   const statusLog = makeStatusLog(conn)
+  const [energyUnit, setEnergyUnit] = useState<'kWh' | 'MWh'>('kWh')
+  const [showTable,  setShowTable]  = useState(false)
+
+  const isElec = conn.product === 'Electricity'
+  const baseUnit = isElec ? 'kWh' : conn.product === 'Gas' ? 'm³' : 'm³'
+  const unit = isElec ? energyUnit : baseUnit
+
+  const rawData = makeConsumptionData(conn)
+  const chartData = rawData.map(row => {
+    if (!isElec || energyUnit === 'kWh') return row
+    // Convert to MWh
+    return {
+      ...row,
+      peak:     row.peak     != null ? parseFloat((row.peak / 1000).toFixed(3))     : null,
+      offpeak:  row.offpeak  != null ? parseFloat((row.offpeak / 1000).toFixed(3))  : null,
+      forecast: row.forecast != null ? parseFloat((row.forecast / 1000).toFixed(3)) : null,
+      actual:   (row as any).actual != null ? parseFloat(((row as any).actual / 1000).toFixed(3)) : null,
+    }
+  })
 
   const ProductIcon = conn.product === 'Electricity' ? Zap
     : conn.product === 'Gas' ? Flame : Droplets
-
-  const unit = conn.product === 'Electricity' ? 'kWh' : conn.product === 'Gas' ? 'm³' : 'm³'
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-end">
@@ -525,25 +569,141 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
                 <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">
                   Consumption Last 12 Months ({unit})
                 </h3>
+                {isElec && <UnitSelect value={energyUnit} onChange={setEnergyUnit} />}
+                <button onClick={() => setShowTable(v => !v)}
+                  className="flex items-center gap-1 text-[11px] text-white/40 hover:text-white/60 border border-border-subtle px-2 py-0.5 rounded-lg transition-colors">
+                  <Table size={10} /> {showTable ? 'Hide' : 'Table'}
+                </button>
+                <span className="ml-auto text-[10px] text-white/30 flex items-center gap-2">
+                  {conn.product === 'Electricity' && (
+                    <>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm inline-block" style={{ background: color }} /> Peak</span>
+                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm inline-block" style={{ background: color, opacity: 0.45 }} /> Off-peak</span>
+                    </>
+                  )}
+                  {conn.product !== 'Electricity' && (
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm inline-block" style={{ background: color }} /> Actual</span>
+                  )}
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm inline-block bg-white/20 border border-dashed border-white/30" /> Forecast</span>
+                </span>
               </div>
               <div className="card p-3">
-                <ResponsiveContainer width="100%" height={190}>
-                  <BarChart data={chartData} barGap={2} barCategoryGap="25%">
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={chartData} barCategoryGap="25%" barGap={0}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1a3d47" vertical={false} />
                     <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#6b8fa3' }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fontSize: 10, fill: '#6b8fa3' }} axisLine={false} tickLine={false}
                       tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
                     <Tooltip
                       contentStyle={{ background: '#0d2b35', border: '1px solid #1a5568', borderRadius: 8, fontSize: 11 }}
-                      formatter={(v: number, n: string) => [v.toLocaleString() + ' ' + unit, n]}
+                      formatter={(v: unknown, n: string) => [
+                        v != null ? `${(v as number).toLocaleString()} ${unit}` : '—', n
+                      ]}
                     />
-                    <Legend iconType="square" iconSize={8} wrapperStyle={{ fontSize: 10, paddingTop: 4 }} />
-                    <Bar dataKey="target" name="Target" fill={color} opacity={0.25} radius={[2,2,0,0]} />
-                    <Bar dataKey="actual" name="Actual" fill={color} opacity={0.85} radius={[2,2,0,0]} />
+                    {conn.product === 'Electricity' ? (
+                      <>
+                        {/* Actual: stacked peak + off-peak */}
+                        <Bar dataKey="peak"    name="Peak"     stackId="actual" fill={color}  opacity={0.9}  radius={[0,0,0,0]} />
+                        <Bar dataKey="offpeak" name="Off-peak" stackId="actual" fill={color}  opacity={0.45} radius={[2,2,0,0]} />
+                        {/* Forecast: single bar, distinct style */}
+                        <Bar dataKey="forecast" name="Forecast" fill="#ffffff" opacity={0.18} radius={[2,2,0,0]} />
+                      </>
+                    ) : (
+                      <>
+                        <Bar dataKey="actual"   name="Actual"   fill={color}   opacity={0.85} radius={[2,2,0,0]} />
+                        <Bar dataKey="forecast" name="Forecast" fill="#ffffff" opacity={0.18} radius={[2,2,0,0]} />
+                      </>
+                    )}
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
+
+            {/* Consumption data table */}
+            {showTable && (
+              <div className="card p-0 overflow-hidden mt-1">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b border-border-subtle bg-bg-secondary">
+                      <th className="tbl-th">Month</th>
+                      {isElec && <th className="tbl-th text-right">Peak ({unit})</th>}
+                      {isElec && <th className="tbl-th text-right">Off-peak ({unit})</th>}
+                      {isElec && <th className="tbl-th text-right">Total ({unit})</th>}
+                      {!isElec && <th className="tbl-th text-right">Actual ({unit})</th>}
+                      <th className="tbl-th text-right">Forecast ({unit})</th>
+                      <th className="tbl-th text-right">Type</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chartData.map((row, i) => {
+                      const isPast = isElec ? row.peak != null : (row as any).actual != null
+                      const total = isElec && row.peak != null
+                        ? (row.peak + (row.offpeak ?? 0))
+                        : null
+                      return (
+                        <tr key={i} className={clsx('tbl-row', !isPast && 'opacity-60')}>
+                          <td className="tbl-td font-medium text-white/70">{MONTHS[i]}</td>
+                          {isElec && (
+                            <>
+                              <td className="tbl-td text-right font-mono text-green-300">
+                                {row.peak != null ? row.peak.toLocaleString() : '—'}
+                              </td>
+                              <td className="tbl-td text-right font-mono text-green-300/60">
+                                {row.offpeak != null ? row.offpeak.toLocaleString() : '—'}
+                              </td>
+                              <td className="tbl-td text-right font-mono font-semibold text-white">
+                                {total != null ? total.toLocaleString() : '—'}
+                              </td>
+                            </>
+                          )}
+                          {!isElec && (
+                            <td className="tbl-td text-right font-mono text-white">
+                              {(row as any).actual != null ? (row as any).actual.toLocaleString() : '—'}
+                            </td>
+                          )}
+                          <td className="tbl-td text-right font-mono text-white/40">
+                            {row.forecast != null ? row.forecast.toLocaleString() : '—'}
+                          </td>
+                          <td className="tbl-td text-right">
+                            <span className={clsx('text-[10px] px-1.5 py-0.5 rounded-full',
+                              isPast ? 'bg-success/10 text-success-light' : 'bg-white/5 text-white/30')}>
+                              {isPast ? 'Actual' : 'Forecast'}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border-default bg-bg-card">
+                      <td className="tbl-td font-bold text-white/50">Total</td>
+                      {isElec && (
+                        <>
+                          <td className="tbl-td text-right font-bold font-mono text-white">
+                            {chartData.filter(r => r.peak != null).reduce((a, r) => a + (r.peak ?? 0), 0).toLocaleString()}
+                          </td>
+                          <td className="tbl-td text-right font-bold font-mono text-white">
+                            {chartData.filter(r => r.offpeak != null).reduce((a, r) => a + (r.offpeak ?? 0), 0).toLocaleString()}
+                          </td>
+                          <td className="tbl-td text-right font-bold font-mono text-white">
+                            {chartData.filter(r => r.peak != null).reduce((a, r) => a + (r.peak ?? 0) + (r.offpeak ?? 0), 0).toLocaleString()}
+                          </td>
+                        </>
+                      )}
+                      {!isElec && (
+                        <td className="tbl-td text-right font-bold font-mono text-white">
+                          {chartData.filter(r => (r as any).actual != null).reduce((a, r) => a + ((r as any).actual ?? 0), 0).toLocaleString()}
+                        </td>
+                      )}
+                      <td className="tbl-td text-right font-bold font-mono text-white/50">
+                        {chartData.filter(r => r.forecast != null).reduce((a, r) => a + (r.forecast ?? 0), 0).toLocaleString()}
+                      </td>
+                      <td className="tbl-td" />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
 
             {/* Action buttons */}
             <div className="flex gap-2 flex-wrap">

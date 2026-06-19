@@ -7,6 +7,7 @@ import { MARKET_CONFIGS } from '@/types'
 import { MOCK_SITES, MOCK_CONNECTIONS, CONSUMPTION_MONTHLY, COST_MONTHLY, MONTHS } from '@/lib/mockData'
 import { useNavigate } from 'react-router-dom'
 import { Zap, DollarSign, Activity, PieChart, Globe, Pin, X, BarChart3, CheckCircle2 } from 'lucide-react'
+import { UnitSelect } from '@/components/UnitSelect'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Legend, Cell,
@@ -51,13 +52,25 @@ export default function Dashboard() {
   const cfg = MARKET_CONFIGS[market]
   const navigate = useNavigate()
 
-  const [pinned,    setPinned]    = useState<WidgetId[]>(DEFAULT_PINNED)
-  const [configure, setConfigure] = useState(false)
+  const [pinned,          setPinned]          = useState<WidgetId[]>(DEFAULT_PINNED)
+  const [configure,       setConfigure]       = useState(false)
+  const [consumptionUnit, setConsumptionUnit] = useState<'kWh' | 'MWh'>('kWh')
 
   const totalKwh    = CONSUMPTION_MONTHLY.electricity.reduce((a, b) => a + b, 0)
+  const displayEnergy = consumptionUnit === 'MWh'
+    ? `${(totalKwh / 1000).toFixed(1)} MWh`
+    : `${(totalKwh / 1000).toFixed(0)}K kWh`
   const totalCost   = COST_MONTHLY[COST_MONTHLY.length - 1]
   const activeConns = MOCK_CONNECTIONS.filter(c => c.status === 'Active').length
   const avgQuality  = Math.round(qualityData.reduce((a, r) => a + r.quality, 0) / qualityData.length)
+
+  const consumptionChartData = MONTHS.map((m, i) => ({
+    month: m,
+    electricity: consumptionUnit === 'MWh'
+      ? parseFloat((CONSUMPTION_MONTHLY.electricity[i] / 100000).toFixed(2))
+      : Math.round(CONSUMPTION_MONTHLY.electricity[i] / 100),
+    gas: CONSUMPTION_MONTHLY.gas[i],
+  }))
 
   const toggleWidget = (id: WidgetId) =>
     setPinned(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
@@ -71,7 +84,7 @@ export default function Dashboard() {
 
         {/* ── KPI stat row ───────────────────────────────────────────────── */}
         <div className="grid grid-cols-5 gap-4 mb-6">
-          <StatCard label="Total Consumption (YTD)" value={`${(totalKwh/1000).toFixed(0)}K kWh`}
+          <StatCard label="Total Consumption (YTD)" value={displayEnergy}
             trend="↑ 4.2%" trendUp={true} trendLabel="vs last year" icon={<Zap />} accent="blue" />
           <StatCard label="Total Spend (MTD)" value={`${cfg.currencySymbol} ${totalCost.toLocaleString()}`}
             trend="↓ 1.8%" trendUp={false} trendLabel="vs last month" icon={<DollarSign />} accent="green" />
@@ -126,16 +139,21 @@ export default function Dashboard() {
           <div className={clsx('grid gap-4 mb-4', has('consumption') && has('map') ? 'grid-cols-2' : 'grid-cols-1')}>
             {has('consumption') && (
               <WidgetCard title="Monthly Consumption" onPin={() => toggleWidget('consumption')} pinned
-                action={<button onClick={() => navigate('/analytics')} className="text-xs text-accent-hover hover:underline">View analytics →</button>}>
+                action={
+                  <div className="flex items-center gap-2">
+                    <UnitSelect value={consumptionUnit} onChange={setConsumptionUnit} />
+                    <button onClick={() => navigate('/analytics')} className="text-xs text-accent-hover hover:underline">View analytics →</button>
+                  </div>
+                }>
                 <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <BarChart data={consumptionChartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
                     <XAxis dataKey="month" tick={{ fill: '#5a6385', fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: '#5a6385', fontSize: 10 }} axisLine={false} tickLine={false} />
                     <Tooltip contentStyle={TT} />
                     <Legend wrapperStyle={{ fontSize: 11, color: '#5a6385' }} />
-                    <Bar dataKey="electricity" name="Electricity (×100 kWh)" fill="#3b82f6" opacity={0.8} radius={[3,3,0,0]} />
-                    <Bar dataKey="gas"         name="Gas (m³)"               fill="#f59e0b" opacity={0.8} radius={[3,3,0,0]} />
+                    <Bar dataKey="electricity" name={`Electricity (${consumptionUnit})`} fill="#3b82f6" opacity={0.8} radius={[3,3,0,0]} />
+                    <Bar dataKey="gas"         name="Gas (m³)"                           fill="#f59e0b" opacity={0.8} radius={[3,3,0,0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </WidgetCard>

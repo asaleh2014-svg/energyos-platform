@@ -24,7 +24,7 @@ invoicesRouter.post('/extract', upload.single('file'), async (req, res) => {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
     const prompt = `You are an energy invoice data extraction assistant.
-Extract the following fields from this utility invoice PDF and return ONLY valid JSON with no markdown:
+Extract all fields from this utility invoice PDF and return ONLY valid JSON with no markdown:
 {
   "supplier": "utility company name",
   "doc_type": "Invoice or Credit Note",
@@ -42,8 +42,20 @@ Extract the following fields from this utility invoice PDF and return ONLY valid
   "period_start": "YYYY-MM-DD or null",
   "period_end": "YYYY-MM-DD or null",
   "meter_number": "meter or POD number or null",
-  "notes": "any anomalies or important notes"
+  "tariff_code": "tariff name or code if present",
+  "notes": "any anomalies or important notes",
+  "line_items": [
+    {
+      "description": "charge description (e.g. Energy Charge, Capacity Charge, Distribution Fee, VAT)",
+      "quantity": number or null,
+      "unit": "kWh or kW or m3 or fixed or null",
+      "unit_price": number or null,
+      "amount": number
+    }
+  ]
 }
+Extract ALL individual charge line items from the invoice (energy charges, capacity charges, network fees, taxes, etc.).
+If line_items cannot be found, return an empty array [].
 If a field is not found, use null. For numbers, return only the numeric value without currency symbols.`
 
     const result = await model.generateContent([

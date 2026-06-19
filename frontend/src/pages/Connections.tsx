@@ -14,6 +14,7 @@ import {
   type FullConnection,
 } from '@/lib/connectionsData'
 import ConnectionDetail from '@/components/connections/ConnectionDetail'
+import AddConnectionPanel from '@/components/connections/AddConnectionPanel'
 
 const PAGE_SIZE = 10
 
@@ -215,14 +216,18 @@ export default function Connections() {
   const [filters, setFilters] = useState<Filters>(EMPTY)
   const [page, setPage]       = useState(1)
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
-  const [selected, setSelected] = useState<FullConnection | null>(null)
+  const [selected, setSelected]   = useState<FullConnection | null>(null)
+  const [adding,   setAdding]     = useState(false)
+  const [extraConns, setExtraConns] = useState<FullConnection[]>([])
 
   const set = (key: keyof Filters) => (val: string) => {
     setFilters(f => ({ ...f, [key]: val })); setPage(1)
   }
   const reset = () => { setFilters(EMPTY); setPage(1) }
 
-  const filtered = useMemo(() => FULL_CONNECTIONS.filter(c => {
+  const allConnections = useMemo(() => [...FULL_CONNECTIONS, ...extraConns], [extraConns])
+
+  const filtered = useMemo(() => allConnections.filter(c => {
     if (filters.ean       && !c.ean_code.toLowerCase().includes(filters.ean.toLowerCase()) &&
                              !c.name.toLowerCase().includes(filters.ean.toLowerCase())) return false
     if (filters.product   && c.product         !== filters.product)       return false
@@ -257,7 +262,14 @@ export default function Connections() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <Topbar title="Connections" subtitle="All grid connection points" />
+      <Topbar title="Connections" subtitle="All grid connection points"
+        actions={
+          <button onClick={() => setAdding(true)}
+            className="flex items-center gap-1.5 text-xs bg-accent hover:bg-accent-hover text-white px-3 py-1.5 rounded-lg transition-colors font-medium">
+            <span className="text-base leading-none">+</span> Add Connection
+          </button>
+        }
+      />
 
       <div className="flex flex-1 overflow-hidden">
 
@@ -498,6 +510,14 @@ export default function Connections() {
       {/* ── Connection detail slide-over ───────────────────────────────────── */}
       {selected && (
         <ConnectionDetail conn={selected} onClose={() => setSelected(null)} />
+      )}
+
+      {/* ── Add connection panel ───────────────────────────────────────────── */}
+      {adding && (
+        <AddConnectionPanel
+          onClose={() => setAdding(false)}
+          onSave={conn => { setExtraConns(prev => [...prev, conn]); setAdding(false) }}
+        />
       )}
     </div>
   )

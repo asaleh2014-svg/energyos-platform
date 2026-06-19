@@ -20,4 +20,8 @@ export const aiApi = {
     const res = await api.post('/ai/summary', { connections, consumption, market })
     return res.data
   },
+  analyzeInvoice: async (invoice: unknown, market: string, provider = 'claude') => {
+    const res = await api.post('/ai/analyze-invoice', { invoice, market, provider })
+    return res.data
+  },
 }

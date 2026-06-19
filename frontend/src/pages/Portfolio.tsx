@@ -4,7 +4,8 @@ import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS } from '@/types'
 import { MOCK_SITES, MOCK_CONNECTIONS, CONSUMPTION_MONTHLY, COST_MONTHLY, MONTHS } from '@/lib/mockData'
 import { ChartCard } from '@/components/ChartCard'
-import { Globe, TrendingDown, TrendingUp, CheckCircle2, AlertCircle, XCircle } from 'lucide-react'
+import { aiApi } from '@/lib/api'
+import { Globe, TrendingDown, TrendingUp, CheckCircle2, AlertCircle, XCircle, Bot, RefreshCw } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, PieChart, Pie, Cell, Legend,
@@ -48,9 +49,24 @@ const qualityData = MONTHS.map((month, i) => ({
 type KpiView = 'spend' | 'consumption' | 'co2'
 
 export default function Portfolio() {
-  const { market } = useAppStore()
+  const { market, aiProvider } = useAppStore()
   const cfg = MARKET_CONFIGS[market]
-  const [kpiView, setKpiView] = useState<KpiView>('spend')
+  const [kpiView,   setKpiView]   = useState<KpiView>('spend')
+  const [aiSummary, setAiSummary] = useState<string>('')
+  const [aiLoading, setAiLoading] = useState(false)
+
+  const generateAISummary = async () => {
+    setAiLoading(true)
+    try {
+      const connections = MOCK_CONNECTIONS.slice(0, 10)
+      const consumption = { monthly_kwh: CONSUMPTION_MONTHLY.electricity, months: MONTHS }
+      const res = await aiApi.summary(connections, consumption, market)
+      setAiSummary(res.summary ?? '')
+    } catch {
+      setAiSummary('Failed to generate summary. Make sure the backend is running.')
+    }
+    setAiLoading(false)
+  }
 
   const activeCount = MOCK_CONNECTIONS.filter(c => c.status === 'Active').length
   const avgQuality  = Math.round(COUNTRIES.reduce((a, c) => a + c.quality, 0) / COUNTRIES.length)
@@ -279,6 +295,41 @@ export default function Portfolio() {
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
+        </div>
+
+        {/* ── AI Portfolio Summary ────────────────────────────────────────────── */}
+        <div className="card mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Bot size={15} className="text-accent" />
+              <h2 className="section-title">AI Portfolio Summary</h2>
+              <span className="text-[10px] text-white/30 px-2 py-0.5 bg-bg-hover rounded-full border border-border-subtle">
+                {aiProvider === 'claude' ? 'Claude Sonnet' : aiProvider === 'gemini' ? 'Gemini Flash' : 'GPT-4o'}
+              </span>
+            </div>
+            <button onClick={generateAISummary} disabled={aiLoading}
+              className="btn-secondary flex items-center gap-2 text-xs disabled:opacity-50">
+              <RefreshCw size={11} className={aiLoading ? 'animate-spin' : ''} />
+              {aiLoading ? 'Generating…' : aiSummary ? 'Regenerate' : 'Generate AI Summary'}
+            </button>
+          </div>
+          {aiSummary ? (
+            <div className="prose-dark text-sm text-white/70 leading-relaxed whitespace-pre-wrap"
+              dangerouslySetInnerHTML={{
+                __html: aiSummary
+                  .replace(/\*\*(.*?)\*\*/g, '<strong class="text-white">$1</strong>')
+                  .replace(/^## (.*)/gm, '<h3 class="text-white font-semibold text-sm mt-4 mb-1">$1</h3>')
+                  .replace(/^### (.*)/gm, '<p class="text-white/80 font-medium mt-3 mb-0.5">$1</p>')
+                  .replace(/^- (.*)/gm, '<p class="text-white/60 pl-3">• $1</p>')
+                  .replace(/\n\n/g, '<br/>')
+              }} />
+          ) : (
+            <div className="text-center py-6">
+              <Bot size={28} className="text-white/10 mx-auto mb-2" />
+              <p className="text-white/30 text-sm">Click "Generate AI Summary" to get an AI-powered analysis of your portfolio</p>
+              <p className="text-white/20 text-xs mt-1">Includes anomaly detection, cost trends, ESG highlights, and recommendations</p>
+            </div>
+          )}
         </div>
 
         {/* ── Sites table ────────────────────────────────────────────────────── */}

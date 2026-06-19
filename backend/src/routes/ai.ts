@@ -77,6 +77,57 @@ aiRouter.post('/chat', async (req, res) => {
   }
 })
 
+// ── Per-invoice anomaly detection ───────────────────────────────────────────
+aiRouter.post('/analyze-invoice', async (req, res) => {
+  const { invoice, market = 'UAE', provider = 'claude' } = req.body
+  if (!invoice) return res.status(400).json({ error: 'No invoice data provided' })
+
+  const prompt = `You are an energy invoice auditor. Analyze this utility invoice and return ONLY valid JSON (no markdown):
+{
+  "status": "Approved" | "Anomaly" | "Pending",
+  "confidence": 0-100,
+  "findings": ["finding 1", "finding 2"],
+  "anomaly_reason": "brief reason if status is Anomaly, else null",
+  "recommendations": ["action 1", "action 2"]
+}
+
+Invoice data:
+${JSON.stringify(invoice, null, 2)}
+
+Market context: ${market}
+
+Check for:
+- Unusual amounts vs typical ${market} utility rates
+- Missing required fields (supplier, dates, amounts)
+- Suspicious VAT rates (UAE: 5%, NL: 21%, UK: 20%)
+- Date inconsistencies (tax date after payment due)
+- Round-number amounts that look like estimates
+- Missing meter/account references`
+
+  try {
+    let reply = ''
+    if (provider === 'gemini') {
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '')
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+      const result = await model.generateContent(prompt)
+      reply = result.response.text().trim()
+    } else {
+      const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      reply = (response.content[0] as { type: string; text: string }).text
+    }
+    const clean = reply.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
+    res.json({ success: true, analysis: JSON.parse(clean) })
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Unknown error'
+    res.status(500).json({ error: 'Analysis failed', detail: msg })
+  }
+})
+
 aiRouter.post('/summary', async (req, res) => {
   const { connections, consumption, market = 'UAE' } = req.body
   const prompt = `

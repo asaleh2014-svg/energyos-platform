@@ -4,7 +4,7 @@ import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS, type AIProvider, type Market } from '@/types'
 import { supabase } from '@/lib/supabase'
 import { aiApi } from '@/lib/api'
-import { Send, Bot, RefreshCw } from 'lucide-react'
+import { Send, Bot, RefreshCw, Download, Trash2 } from 'lucide-react'
 import clsx from 'clsx'
 
 interface Message {
@@ -13,9 +13,10 @@ interface Message {
 }
 
 interface PortfolioContext {
-  invoices: any[]
-  sites: any[]
+  invoices:    any[]
+  sites:       any[]
   connections: any[]
+  consumption: any[]
   loaded: boolean
 }
 
@@ -26,11 +27,14 @@ const PROVIDERS: { id: AIProvider; name: string; model: string; tag: string }[] 
 ]
 
 const QUICK_PROMPTS = [
-  { label: '🔍 Anomaly scan',     text: 'Identify any anomalies or unusual patterns in my invoice data.' },
+  { label: '🔍 Anomaly scan',     text: 'Identify any anomalies or unusual patterns in my invoice and consumption data.' },
   { label: '💰 Spend analysis',   text: 'Summarise my total spend, VAT, and which suppliers I am paying most.' },
   { label: '📋 Exec summary',     text: 'Generate an executive summary of my energy portfolio for the board.' },
   { label: '🧾 Invoice check',    text: 'Check my invoices for any billing errors or overcharges.' },
   { label: '🌱 ESG report',       text: 'What ESG metrics should I report for UAE Net Zero 2050 compliance?' },
+  { label: '⚡ Consumption trend', text: 'Analyse my consumption trends across sites and identify the highest consuming locations.' },
+  { label: '📉 Cost reduction',   text: 'What are the top 3 actions I can take to reduce my energy costs?' },
+  { label: '🔋 Contract review',  text: 'Based on my consumption patterns, are my current tariff contracts optimal?' },
 ]
 
 function buildContext(data: PortfolioContext, flags: Record<string, boolean>): string {
@@ -41,15 +45,17 @@ function buildContext(data: PortfolioContext, flags: Record<string, boolean>): s
     const totalExVat = data.invoices.reduce((a, i) => a + (i.amount_ex_vat ?? 0), 0)
     const totalVat   = data.invoices.reduce((a, i) => a + (i.vat_amount ?? 0), 0)
     const totalInc   = data.invoices.reduce((a, i) => a + (i.amount_inc_vat ?? 0), 0)
+    const anomalies  = data.invoices.filter(i => i.status === 'Anomaly').length
     lines.push(`Total invoices: ${data.invoices.length}`)
-    lines.push(`Total excl. VAT: AED ${totalExVat.toLocaleString()}`)
-    lines.push(`Total VAT: AED ${totalVat.toLocaleString()}`)
-    lines.push(`Total incl. VAT: AED ${totalInc.toLocaleString()}`)
+    lines.push(`Total excl. VAT: ${totalExVat.toLocaleString()}`)
+    lines.push(`Total VAT: ${totalVat.toLocaleString()}`)
+    lines.push(`Total incl. VAT: ${totalInc.toLocaleString()}`)
+    lines.push(`Anomalies flagged: ${anomalies}`)
     lines.push(`Statuses: ${[...new Set(data.invoices.map(i => i.status))].join(', ')}`)
     lines.push(`Suppliers: ${[...new Set(data.invoices.map(i => i.supplier).filter(Boolean))].join(', ')}`)
     lines.push('\nInvoice details:')
     data.invoices.forEach(inv => {
-      lines.push(`  • ${inv.nus_ref ?? 'N/A'} | ${inv.supplier ?? '?'} | ${inv.doc_type} | ExVAT: AED ${inv.amount_ex_vat ?? '?'} | VAT: AED ${inv.vat_amount ?? '?'} | Total: AED ${inv.amount_inc_vat ?? '?'} | Due: ${inv.payment_due ?? '?'} | Status: ${inv.status} | File: ${inv.file_name ?? 'none'}`)
+      lines.push(`  • ${inv.nus_ref ?? 'N/A'} | ${inv.supplier ?? '?'} | ${inv.doc_type} | ExVAT: ${inv.amount_ex_vat ?? '?'} | VAT: ${inv.vat_amount ?? '?'} | Total: ${inv.amount_inc_vat ?? '?'} | Due: ${inv.payment_due ?? '?'} | Status: ${inv.status}${inv.notes ? ` | Notes: ${inv.notes}` : ''}`)
     })
     lines.push('')
   }
@@ -65,7 +71,17 @@ function buildContext(data: PortfolioContext, flags: Record<string, boolean>): s
   if (flags['Sites'] && data.sites.length > 0) {
     lines.push(`--- SITES (${data.sites.length} locations) ---`)
     data.sites.forEach((s: any) => {
-      lines.push(`  • ${s.name} | ${s.city}, ${s.country} | Status: ${s.status}`)
+      lines.push(`  • ${s.name} | Status: ${s.status}`)
+    })
+    lines.push('')
+  }
+
+  if (flags['Consumption data'] && data.consumption.length > 0) {
+    lines.push(`--- CONSUMPTION RECORDS (${data.consumption.length} records) ---`)
+    const totalKwh = data.consumption.filter(c => c.unit === 'kWh').reduce((a: number, c: any) => a + (c.consumption ?? 0), 0)
+    lines.push(`Total electricity: ${totalKwh.toLocaleString()} kWh`)
+    data.consumption.slice(0, 20).forEach((c: any) => {
+      lines.push(`  • Meter: ${c.meter_id?.slice(0,8)} | ${c.period_start}–${c.period_end} | ${c.consumption} ${c.unit}${c.cost ? ` | Cost: ${c.cost}` : ''}`)
     })
     lines.push('')
   }
@@ -80,12 +96,13 @@ function buildContext(data: PortfolioContext, flags: Record<string, boolean>): s
 export default function AIAuditor() {
   const { aiProvider, setAIProvider, market } = useAppStore()
   const [localMarket, setLocalMarket] = useState<Market>(market)
-  const [portfolio,   setPortfolio]   = useState<PortfolioContext>({ invoices: [], sites: [], connections: [], loaded: false })
+  const [portfolio,   setPortfolio]   = useState<PortfolioContext>({ invoices: [], sites: [], connections: [], consumption: [], loaded: false })
   const [loadingData, setLoadingData] = useState(true)
   const [contextFlags, setContextFlags] = useState<Record<string, boolean>>({
     'Invoice data':       true,
     'Fleet data':         true,
     'Sites':              true,
+    'Consumption data':   true,
     'Budget data':        false,
     'Tariff tables':      false,
   })
@@ -99,17 +116,19 @@ export default function AIAuditor() {
   // ── Load real data from Supabase ────────────────────────────────────────
   const loadPortfolioData = async () => {
     setLoadingData(true)
-    const [{ data: invoices }, { data: sites }, { data: connections }] = await Promise.all([
+    const [{ data: invoices }, { data: sites }, { data: connections }, { data: consumption }] = await Promise.all([
       supabase.from('invoices').select('*').order('created_at', { ascending: false }),
-      supabase.from('sites').select('*').limit(50),
+      supabase.from('sites').select('id, name, status').limit(50),
       supabase.from('energy_connections').select('*').limit(50),
+      supabase.from('consumption_records').select('*').order('period_start', { ascending: false }).limit(100),
     ])
 
     const inv  = invoices    ?? []
     const sit  = sites       ?? []
     const conn = connections ?? []
+    const cons = consumption ?? []
 
-    setPortfolio({ invoices: inv, sites: sit, connections: conn, loaded: true })
+    setPortfolio({ invoices: inv, sites: sit, connections: conn, consumption: cons, loaded: true })
     setLoadingData(false)
 
     // Set welcome message with real stats
@@ -119,8 +138,9 @@ export default function AIAuditor() {
       role: 'assistant',
       content: `**EnergyOS Auditor ready — live data loaded.**\n\n` +
         `I have access to your real portfolio:\n` +
-        `• **${inv.length} invoice${inv.length !== 1 ? 's'  : ''}** — Total AED ${totalInv.toLocaleString()} incl. VAT${anomalies > 0 ? ` · ⚠️ ${anomalies} anomal${anomalies > 1 ? 'ies' : 'y'}` : ''}\n` +
-        `• **${conn.length} connection${conn.length !== 1 ? 's' : ''}** across ${sit.length} site${sit.length !== 1 ? 's' : ''}\n\n` +
+        `• **${inv.length} invoice${inv.length !== 1 ? 's'  : ''}** — Total ${totalInv.toLocaleString()} incl. VAT${anomalies > 0 ? ` · ⚠️ ${anomalies} anomal${anomalies > 1 ? 'ies' : 'y'}` : ''}\n` +
+        `• **${conn.length} connection${conn.length !== 1 ? 's' : ''}** across ${sit.length} site${sit.length !== 1 ? 's' : ''}\n` +
+        `• **${cons.length} consumption record${cons.length !== 1 ? 's' : ''}** loaded\n\n` +
         `Ask me anything — I'll analyse your actual data.`
     }])
   }
@@ -224,6 +244,7 @@ export default function AIAuditor() {
                 <div className="text-[10px] text-success-light">✓ {portfolio.invoices.length} invoices</div>
                 <div className="text-[10px] text-success-light">✓ {portfolio.connections.length} connections</div>
                 <div className="text-[10px] text-success-light">✓ {portfolio.sites.length} sites</div>
+                <div className="text-[10px] text-success-light">✓ {portfolio.consumption.length} consumption records</div>
               </div>
             )}
           </div>
@@ -233,12 +254,29 @@ export default function AIAuditor() {
         <div className="flex-1 flex flex-col card p-0 overflow-hidden">
           <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border-subtle">
             <div className={clsx('w-2 h-2 rounded-full', loadingData ? 'bg-warning animate-pulse' : 'bg-success animate-pulse')} />
-            <div>
+            <div className="flex-1">
               <div className="text-sm font-semibold text-white">AI Energy Auditor</div>
               <div className="text-xs text-white/30">
                 {PROVIDERS.find(p => p.id === aiProvider)?.name} · {MARKET_CONFIGS[localMarket].flag} {localMarket} market · {loadingData ? 'Loading data…' : 'Live data active'}
               </div>
             </div>
+            <button
+              onClick={() => {
+                const txt = messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n')
+                const blob = new Blob([txt], { type: 'text/plain' })
+                const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
+                a.download = `energyos-ai-audit-${new Date().toISOString().slice(0,10)}.txt`; a.click()
+              }}
+              title="Export chat"
+              className="text-white/30 hover:text-white/60 transition-colors p-1.5">
+              <Download size={13} />
+            </button>
+            <button
+              onClick={() => { setMessages([]); setShowQuick(true) }}
+              title="Clear chat"
+              className="text-white/30 hover:text-white/60 transition-colors p-1.5">
+              <Trash2 size={13} />
+            </button>
           </div>
 
           <div ref={msgsRef} className="flex-1 overflow-y-auto p-4 space-y-4">

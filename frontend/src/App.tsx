@@ -1,10 +1,15 @@
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { AuthProvider } from '@/lib/auth'
+import { AuthGuard } from '@/components/layout/AuthGuard'
 import { AppLayout } from '@/components/layout/AppLayout'
+import Login from '@/pages/Login'
+import Signup from '@/pages/Signup'
 import Dashboard from '@/pages/Dashboard'
 import Analytics from '@/pages/Analytics'
 import Forecast from '@/pages/Forecast'
 import Connections from '@/pages/Connections'
 import Sites from '@/pages/Sites'
+import Buildings from '@/pages/Buildings'
 import Meters from '@/pages/Meters'
 import AIAuditor from '@/pages/AIAuditor'
 import Reports from '@/pages/Reports'
@@ -14,26 +19,39 @@ import Emissions from '@/pages/Emissions'
 import Budget from '@/pages/Budget'
 
 const router = createBrowserRouter([
+  { path: '/login',  element: <Login /> },
+  { path: '/signup', element: <Signup /> },
   {
-    path: '/',
-    element: <AppLayout />,
+    element: <AuthGuard />,
     children: [
-      { index: true,        element: <Dashboard /> },
-      { path: 'analytics',  element: <Analytics /> },
-      { path: 'forecast',   element: <Forecast /> },
-      { path: 'connections',element: <Connections /> },
-      { path: 'sites',      element: <Sites /> },
-      { path: 'meters',     element: <Meters /> },
-      { path: 'emissions',  element: <Emissions /> },
-      { path: 'budget',     element: <Budget /> },
-      { path: 'ai',         element: <AIAuditor /> },
-      { path: 'reports',    element: <Reports /> },
-      { path: 'invoices',   element: <Invoices /> },
-      { path: 'settings',   element: <Settings /> },
+      {
+        path: '/',
+        element: <AppLayout />,
+        children: [
+          { index: true,        element: <Dashboard /> },
+          { path: 'analytics',  element: <Analytics /> },
+          { path: 'forecast',   element: <Forecast /> },
+          { path: 'connections',element: <Connections /> },
+          { path: 'sites',      element: <Sites /> },
+          { path: 'buildings',      element: <Buildings /> },
+          { path: 'buildings/:id',  element: <Buildings /> },
+          { path: 'meters',     element: <Meters /> },
+          { path: 'emissions',  element: <Emissions /> },
+          { path: 'budget',     element: <Budget /> },
+          { path: 'ai',         element: <AIAuditor /> },
+          { path: 'reports',    element: <Reports /> },
+          { path: 'invoices',   element: <Invoices /> },
+          { path: 'settings',   element: <Settings /> },
+        ],
+      },
     ],
   },
 ])
 
 export default function App() {
-  return <RouterProvider router={router} />
+  return (
+    <AuthProvider>
+      <RouterProvider router={router} />
+    </AuthProvider>
+  )
 }

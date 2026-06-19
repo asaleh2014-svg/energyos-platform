@@ -1,15 +1,16 @@
+import React from 'react'
 import { useAppStore } from '@/lib/store'
-import { MARKET_CONFIGS, type Market } from '@/types'
 import { Menu, Bell, Bot } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
 interface TopbarProps {
   title: string
   subtitle?: string
+  actions?: React.ReactNode
 }
 
-export function Topbar({ title, subtitle }: TopbarProps) {
-  const { market, setMarket, toggleSidebar } = useAppStore()
+export function Topbar({ title, subtitle, actions }: TopbarProps) {
+  const { toggleSidebar } = useAppStore()
   const navigate = useNavigate()
 
   return (
@@ -24,16 +25,7 @@ export function Topbar({ title, subtitle }: TopbarProps) {
       </div>
 
       <div className="flex items-center gap-2">
-        <select
-          value={market}
-          onChange={(e) => setMarket(e.target.value as Market)}
-          className="bg-bg-card border border-border-subtle text-white/80 text-xs rounded-lg px-3 py-1.5 focus:outline-none focus:border-accent cursor-pointer appearance-none"
-        >
-          {(Object.entries(MARKET_CONFIGS) as [Market, typeof MARKET_CONFIGS[Market]][]).map(([k, v]) => (
-            <option key={k} value={k}>{v.flag} {v.label} · {v.tariffAuthority.split('/')[0].trim()}</option>
-          ))}
-        </select>
-
+        {actions}
         <button
           onClick={() => navigate('/ai')}
           className="flex items-center gap-1.5 text-xs bg-accent hover:bg-accent-hover text-white px-3 py-1.5 rounded-lg transition-colors font-medium"

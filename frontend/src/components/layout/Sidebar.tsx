@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom'
 import { useAppStore } from '@/lib/store'
+import { useAuth } from '@/lib/auth'
 import { MARKET_CONFIGS } from '@/types'
 import {
   LayoutDashboard, BarChart3, Zap, Building2, Gauge, Bot,
-  FileText, Receipt, Settings, X, Leaf, TrendingDown,
-  DollarSign, PieChart, Globe, Lightbulb, Library, Layers,
+  Receipt, Settings, X, Leaf, TrendingDown,
+  DollarSign, Globe, Lightbulb, Library, LogOut, Hotel,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -16,6 +17,7 @@ const NAV = [
   { section: 'Assets', items: [
     { to: '/connections', icon: Zap,      label: 'Connections' },
     { to: '/sites',       icon: Building2,label: 'Sites'       },
+    { to: '/buildings',   icon: Hotel,    label: 'Buildings'   },
     { to: '/meters',      icon: Gauge,    label: 'Meters'      },
   ]},
   { section: 'Analytics', items: [
@@ -41,6 +43,7 @@ const NAV = [
 
 export function Sidebar() {
   const { tenant, market, sidebarOpen, toggleSidebar } = useAppStore()
+  const { profile, signOut } = useAuth()
   const cfg = MARKET_CONFIGS[market]
 
   if (!sidebarOpen) return null
@@ -100,19 +103,27 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Tenant badge */}
-      <div className="p-3 border-t border-border-subtle">
+      {/* Tenant badge + sign out */}
+      <div className="p-3 border-t border-border-subtle space-y-2">
         <NavLink to="/settings" className="block">
           <div className="bg-bg-card border border-border-subtle rounded-lg p-3 hover:border-border-default transition-colors cursor-pointer">
             <div className="flex items-center gap-2 mb-0.5">
               <span className="text-[7px] text-success">●</span>
-              <span className="text-[13px] font-medium text-white truncate">{tenant?.name}</span>
+              <span className="text-[13px] font-medium text-white truncate">
+                {profile?.name ?? tenant?.name}
+              </span>
             </div>
             <div className="text-[11px] text-accent-hover capitalize">
-              {cfg.flag} {tenant?.plan} · {tenant?.connections_count} connections
+              {cfg.flag} {profile?.plan ?? tenant?.plan} · {profile?.role ?? 'Admin'}
             </div>
           </div>
         </NavLink>
+        <button
+          onClick={signOut}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] text-white/40 hover:text-red-400 hover:bg-red-400/10 transition-all"
+        >
+          <LogOut size={14} /> Sign out
+        </button>
       </div>
     </aside>
   )

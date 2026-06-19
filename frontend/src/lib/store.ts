@@ -7,10 +7,12 @@ import {
 } from '@/lib/mockData'
 
 interface AppState {
-  market:        Market
+  market:        Market       // global fallback only
+  cityMarkets:   Record<string, Market>   // city → Market
   aiProvider:    AIProvider
   tenant:        Tenant | null
   sidebarOpen:   boolean
+  energyUnit:    'kWh' | 'MWh'
 
   // Site-level energy mix (keyed by site_id)
   siteMixes:     Record<string, ElecSource>
@@ -19,9 +21,13 @@ interface AppState {
   siteTariffs:   Record<string, TariffStructure>
 
   setMarket:     (m: Market) => void
+  setCityMarket:          (city: string, m: Market) => void
+  getCityMarket:          (city: string) => Market
+  applyMarketToCountry:   (country: string, cities: string[], m: Market) => void
   setAIProvider: (p: AIProvider) => void
   setTenant:     (t: Tenant) => void
   toggleSidebar: () => void
+  setEnergyUnit: (u: 'kWh' | 'MWh') => void
 
   /** Set energy mix for one site */
   setSiteMix: (siteId: string, mix: ElecSource) => void
@@ -40,7 +46,9 @@ export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       market:      'UAE',
+      cityMarkets: {},
       aiProvider:  'claude',
+      energyUnit:  'kWh',
       siteMixes:   DEFAULT_SITE_ELEC_SOURCES,
       siteTariffs: DEFAULT_SITE_TARIFFS,
       tenant: {
@@ -55,6 +63,14 @@ export const useAppStore = create<AppState>()(
       sidebarOpen: true,
 
       setMarket:     (market)     => set({ market }),
+      setEnergyUnit: (energyUnit) => set({ energyUnit }),
+      setCityMarket: (city, m)   => set(s => ({ cityMarkets: { ...s.cityMarkets, [city]: m } })),
+      getCityMarket: (city)      => get().cityMarkets[city] ?? get().market,
+      applyMarketToCountry: (country, cities, m) => set(s => {
+        const updated = { ...s.cityMarkets }
+        cities.forEach(c => { updated[c] = m })
+        return { cityMarkets: updated }
+      }),
       setAIProvider: (aiProvider) => set({ aiProvider }),
       setTenant:     (tenant)     => set({ tenant }),
       toggleSidebar: ()           => set(s => ({ sidebarOpen: !s.sidebarOpen })),

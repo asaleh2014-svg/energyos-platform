@@ -10,6 +10,7 @@ import {
 } from '@/lib/mockData'
 import { Zap, Flame } from 'lucide-react'
 import { ChartCard } from '@/components/ChartCard'
+import { UnitSelect } from '@/components/UnitSelect'
 import {
   ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Legend,
@@ -43,19 +44,20 @@ const GROUP_COLORS = [
 ]
 
 // ─── Fleet total data lookup ───────────────────────────────────────────────────
-function getFleetData(g: Granularity) {
-  switch (g) {
-    case 'hour':  return { labels: CONSUMPTION_HOURLY.labels,  elec: CONSUMPTION_HOURLY.electricity,  gas: CONSUMPTION_HOURLY.gas,  unit:'kWh' }
-    case 'day':   return { labels: CONSUMPTION_DAILY.labels,   elec: CONSUMPTION_DAILY.electricity,   gas: CONSUMPTION_DAILY.gas,   unit:'kWh' }
-    case 'week':  return { labels: CONSUMPTION_WEEKLY.labels,  elec: CONSUMPTION_WEEKLY.electricity,  gas: CONSUMPTION_WEEKLY.gas,  unit:'kWh' }
-    case 'month': return { labels: MONTHS,                     elec: CONSUMPTION_MONTHLY.electricity, gas: CONSUMPTION_MONTHLY.gas, unit:'kWh' }
-    case 'year':  return {
-      labels: CONSUMPTION_YEARLY.labels,
-      elec: CONSUMPTION_YEARLY.electricity.map(v => Math.round(v / 1000)),
-      gas:  CONSUMPTION_YEARLY.gas,
-      unit: 'MWh',
+function getFleetData(g: Granularity, energyUnit: 'kWh' | 'MWh') {
+  const raw = (() => {
+    switch (g) {
+      case 'hour':  return { labels: CONSUMPTION_HOURLY.labels,  elec: CONSUMPTION_HOURLY.electricity,  gas: CONSUMPTION_HOURLY.gas  }
+      case 'day':   return { labels: CONSUMPTION_DAILY.labels,   elec: CONSUMPTION_DAILY.electricity,   gas: CONSUMPTION_DAILY.gas   }
+      case 'week':  return { labels: CONSUMPTION_WEEKLY.labels,  elec: CONSUMPTION_WEEKLY.electricity,  gas: CONSUMPTION_WEEKLY.gas  }
+      case 'month': return { labels: MONTHS,                     elec: CONSUMPTION_MONTHLY.electricity, gas: CONSUMPTION_MONTHLY.gas }
+      case 'year':  return { labels: CONSUMPTION_YEARLY.labels,  elec: CONSUMPTION_YEARLY.electricity,  gas: CONSUMPTION_YEARLY.gas  }
     }
-  }
+  })()
+  const elec = energyUnit === 'MWh'
+    ? raw.elec.map(v => parseFloat((v / 1000).toFixed(2)))
+    : raw.elec
+  return { ...raw, elec, unit: energyUnit }
 }
 
 const TT = { background:'#0d2b35', border:'1px solid #1a5568', borderRadius:8, fontSize:11 }
@@ -77,7 +79,8 @@ function PortfolioView({
   showElec: boolean; showGas: boolean
   setShowElec: (v: boolean) => void; setShowGas: (v: boolean) => void
 }) {
-  const { labels, elec, gas, unit } = getFleetData(gran)
+  const [energyUnit, setEnergyUnit] = useState<'kWh' | 'MWh'>('kWh')
+  const { labels, elec, gas, unit } = getFleetData(gran, energyUnit)
 
   const chartData = labels.map((label, i) => ({
     label,
@@ -119,7 +122,8 @@ function PortfolioView({
         title={`Fleet Total — ${GRAN.find(g=>g.id===gran)!.label} View`}
         subtitle="Dual axis · electricity (left) + gas (right)"
         action={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <UnitSelect value={energyUnit} onChange={setEnergyUnit} />
             {[
               { active: showElec, set: setShowElec, color:'blue',  Icon: Zap,   label:'Electricity' },
               { active: showGas,  set: setShowGas,  color:'amber', Icon: Flame, label:'Gas' },
@@ -234,7 +238,8 @@ function GroupedView({
   gran: Granularity
   groupLevel: Exclude<GroupLevel, 'portfolio'>
 }) {
-  const { labels, unit } = getFleetData(gran)
+  const [energyUnit, setEnergyUnit] = useState<'kWh' | 'MWh'>('kWh')
+  const { labels, unit } = getFleetData(gran, energyUnit)
   const tfmt = tickFmt(labels)
 
   const elecGroups = groupByLevel(groupLevel, 'electricity', gran)
@@ -290,6 +295,7 @@ function GroupedView({
         <ChartCard
           title={`⚡ Electricity by ${GROUP_LEVELS.find(l=>l.id===groupLevel)!.label} (${unit})`}
           subtitle={`Stacked bars — each colour is one ${groupLevel}`}
+          action={<UnitSelect value={energyUnit} onChange={setEnergyUnit} />}
           className="mb-4"
           table={
             <table className="w-full">
@@ -431,7 +437,7 @@ function GroupedView({
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function Analytics() {
   const { market } = useAppStore()
-  const _cfg = MARKET_CONFIGS[market]   // available for future market-specific display
+  const _cfg = MARKET_CONFIGS[market]
   void _cfg
 
   const [gran,      setGran]      = useState<Granularity>('month')
