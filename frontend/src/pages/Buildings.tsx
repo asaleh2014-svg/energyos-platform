@@ -22,6 +22,168 @@ const MOCK_SITE_IDS = [
   'site-sharjah-1',   'site-sharjah-2',
 ]
 
+// ─── UAE sector EUI benchmarks (kWh/m²/year) ──────────────────────────────────
+// Source: DEWA / ADDC energy efficiency guidelines, Dubai Green Building Regulations
+const UAE_BENCHMARKS: Record<string, { good: number; typical: number; poor: number; label: string }> = {
+  'Office':      { good: 120, typical: 200, poor: 300, label: 'Office' },
+  'Retail':      { good: 180, typical: 280, poor: 400, label: 'Retail' },
+  'Hotel':       { good: 200, typical: 320, poor: 500, label: 'Hotel' },
+  'Residential': { good:  80, typical: 130, poor: 200, label: 'Residential' },
+  'Industrial':  { good: 150, typical: 250, poor: 380, label: 'Industrial' },
+  'Mixed-Use':   { good: 140, typical: 230, poor: 350, label: 'Mixed-Use' },
+}
+
+const DEFAULT_BENCHMARK = { good: 150, typical: 240, poor: 360, label: 'General' }
+
+function euiColor(eui: number, bm: typeof DEFAULT_BENCHMARK) {
+  if (eui <= bm.good)    return '#10b981' // green
+  if (eui <= bm.typical) return '#f59e0b' // amber
+  return '#ef4444'                         // red
+}
+
+function euiRating(eui: number, bm: typeof DEFAULT_BENCHMARK): string {
+  if (eui <= bm.good)    return 'Efficient'
+  if (eui <= bm.typical) return 'Typical'
+  return 'Poor'
+}
+
+// ─── Benchmarking view ────────────────────────────────────────────────────────
+function BenchmarkingView({ buildings }: { buildings: MockBuilding[] }) {
+  const [sector, setSector] = useState('Office')
+  const bm = UAE_BENCHMARKS[sector] ?? DEFAULT_BENCHMARK
+  const maxEUI = Math.max(bm.poor * 1.1, ...buildings.map(b => b.elec_kwh_year / b.area_m2))
+
+  const sorted = [...buildings]
+    .map(b => ({ ...b, eui: +(b.elec_kwh_year / b.area_m2).toFixed(1) }))
+    .sort((a, b) => a.eui - b.eui)
+
+  const efficient = sorted.filter(b => b.eui <= bm.good).length
+  const poor      = sorted.filter(b => b.eui > bm.typical).length
+
+  return (
+    <div className="space-y-5">
+      {/* Sector picker + legend */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-white/40 uppercase tracking-widest">Building type</span>
+          <select value={sector} onChange={e => setSector(e.target.value)}
+            className="input text-xs py-1.5 px-3">
+            {Object.keys(UAE_BENCHMARKS).map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div className="flex items-center gap-4 text-xs text-white/50 ml-auto">
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"/>≤{bm.good} kWh/m² Efficient</span>
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block"/>≤{bm.typical} Typical</span>
+          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-400 inline-block"/>&gt;{bm.typical} Poor</span>
+        </div>
+      </div>
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-4 gap-4">
+        {[
+          { label: 'Buildings', value: String(sorted.length), sub: 'in portfolio' },
+          { label: 'Efficient', value: String(efficient), sub: `≤${bm.good} kWh/m²`, color: 'text-emerald-400' },
+          { label: 'Poor performers', value: String(poor), sub: `>${bm.typical} kWh/m²`, color: 'text-red-400' },
+          { label: 'Portfolio avg EUI', value: sorted.length ? `${(sorted.reduce((a,b)=>a+b.eui,0)/sorted.length).toFixed(0)} kWh/m²` : '—', sub: `vs ${bm.typical} typical` },
+        ].map(({ label, value, sub, color }) => (
+          <div key={label} className="card">
+            <div className="label mb-1">{label}</div>
+            <div className={`text-xl font-semibold ${color ?? 'text-white'}`}>{value}</div>
+            <div className="text-xs text-white/35 mt-0.5">{sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Benchmark bars */}
+      <div className="card p-4 space-y-3">
+        <div className="text-xs font-semibold text-white/60 uppercase tracking-widest mb-3">
+          EUI Ranking — {sector} buildings · UAE benchmarks
+        </div>
+
+        {/* Reference lines */}
+        <div className="relative h-4 mb-1">
+          {[
+            { pct: (bm.good / maxEUI) * 100, label: `Good ≤${bm.good}`, color: '#10b981' },
+            { pct: (bm.typical / maxEUI) * 100, label: `Typical ≤${bm.typical}`, color: '#f59e0b' },
+            { pct: (bm.poor / maxEUI) * 100, label: `Poor >${bm.typical}`, color: '#ef4444' },
+          ].map(({ pct, label, color }) => (
+            <div key={label} className="absolute top-0 bottom-0 flex flex-col items-center"
+              style={{ left: `${pct}%` }}>
+              <div className="w-px h-full opacity-30" style={{ background: color }} />
+              <span className="absolute -top-4 text-[9px] whitespace-nowrap -translate-x-1/2"
+                style={{ color }}>{label}</span>
+            </div>
+          ))}
+        </div>
+
+        {sorted.map(b => {
+          const color = euiColor(b.eui, bm)
+          const pct   = Math.min((b.eui / maxEUI) * 100, 100)
+          const rating = euiRating(b.eui, bm)
+          return (
+            <div key={b.id} className="flex items-center gap-3">
+              <div className="w-36 text-xs text-white/70 truncate flex-shrink-0">{b.name}</div>
+              <div className="flex-1 bg-bg-secondary rounded-full h-4 relative overflow-hidden">
+                <div className="h-full rounded-full transition-all"
+                  style={{ width: `${pct}%`, background: color, opacity: 0.8 }} />
+              </div>
+              <div className="w-20 text-right text-xs font-mono" style={{ color }}>
+                {b.eui} kWh/m²
+              </div>
+              <div className="w-16 text-xs text-right" style={{ color }}>
+                {rating}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Detail table */}
+      <div className="card p-0 overflow-hidden">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-border-subtle">
+              <th className="tbl-th">Building</th>
+              <th className="tbl-th text-right">Area (m²)</th>
+              <th className="tbl-th text-right">Elec (kWh/yr)</th>
+              <th className="tbl-th text-right">EUI (kWh/m²)</th>
+              <th className="tbl-th text-right">vs Typical</th>
+              <th className="tbl-th text-center">Rating</th>
+              <th className="tbl-th text-center">Label</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map(b => {
+              const diff = b.eui - bm.typical
+              const color = euiColor(b.eui, bm)
+              return (
+                <tr key={b.id} className="tbl-row">
+                  <td className="tbl-td text-white/80">{b.name}</td>
+                  <td className="tbl-td text-right font-mono">{b.area_m2.toLocaleString()}</td>
+                  <td className="tbl-td text-right font-mono">{b.elec_kwh_year.toLocaleString()}</td>
+                  <td className="tbl-td text-right font-mono font-semibold" style={{ color }}>{b.eui}</td>
+                  <td className="tbl-td text-right font-mono">
+                    <span style={{ color: diff > 0 ? '#ef4444' : '#10b981' }}>
+                      {diff > 0 ? '+' : ''}{diff.toFixed(0)}
+                    </span>
+                  </td>
+                  <td className="tbl-td text-center">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                      style={{ background: color + '25', color }}>
+                      {euiRating(b.eui, bm)}
+                    </span>
+                  </td>
+                  <td className="tbl-td text-center"><LabelBadge label={b.energy_label} /></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function LabelBadge({ label }: { label: EnergyLabel }) {
   return (
     <span className="inline-flex items-center justify-center w-9 h-7 rounded font-bold text-xs text-white"
@@ -228,6 +390,7 @@ function BuildingRow({ building }: { building: MockBuilding }) {
 }
 
 function BuildingList() {
+  const [tab, setTab] = useState<'list' | 'benchmark'>('list')
   const [search, setSearch] = useState('')
   const [labelFilter, setLabelFilter] = useState<EnergyLabel | ''>('')
   const [searchParams] = useSearchParams()
@@ -251,6 +414,20 @@ function BuildingList() {
     <div className="flex flex-col h-full">
       <Topbar title="Buildings" />
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
+
+        {/* Tab bar */}
+        <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-xl p-1 w-fit">
+          {([['list', 'All Buildings'], ['benchmark', 'EUI Benchmarking']] as const).map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${tab === id ? 'bg-accent text-white shadow' : 'text-white/40 hover:text-white/70'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'benchmark' ? (
+          <BenchmarkingView buildings={allBuildings} />
+        ) : (<>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
@@ -304,6 +481,7 @@ function BuildingList() {
           </table>
         </div>
 
+        </>)}
       </div>
     </div>
   )

@@ -7,6 +7,7 @@ import { aiRouter } from './routes/ai'
 import { connectionsRouter } from './routes/connections'
 import { sitesRouter } from './routes/sites'
 import { invoicesRouter } from './routes/invoices'
+import { anomaliesRouter } from './routes/anomalies'
 
 dotenv.config()
 
@@ -27,5 +28,6 @@ app.use('/api/ai', aiLimiter, aiRouter)
 app.use('/api/connections', connectionsRouter)
 app.use('/api/sites', sitesRouter)
 app.use('/api/invoices', invoicesRouter)
+app.use('/api/anomalies', anomaliesRouter)
 
 app.listen(PORT, () => console.log(`EnergyOS backend running on port ${PORT}`))

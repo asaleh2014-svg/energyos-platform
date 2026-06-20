@@ -1,13 +1,26 @@
 import { NavLink } from 'react-router-dom'
 import { useAppStore } from '@/lib/store'
-import { useAuth } from '@/lib/auth'
+import { useAuth, useTenantId } from '@/lib/auth'
 import { MARKET_CONFIGS } from '@/types'
 import {
   LayoutDashboard, BarChart3, Zap, Building2, Gauge, Bot,
   Receipt, Settings, X, Leaf, TrendingDown,
-  DollarSign, Globe, Lightbulb, Library, LogOut, Hotel,
+  DollarSign, Globe, Lightbulb, Library, LogOut, Hotel, BellDot,
 } from 'lucide-react'
 import clsx from 'clsx'
+import { useEffect, useState } from 'react'
+
+function useAlertCount() {
+  const tenantId = useTenantId()
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    fetch(`/api/anomalies/${tenantId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setCount(d.anomalies?.filter((a: any) => a.severity === 'critical').length ?? 0) })
+      .catch(() => {})
+  }, [tenantId])
+  return count
+}
 
 const NAV = [
   { section: 'Overview', items: [
@@ -33,6 +46,7 @@ const NAV = [
     { to: '/invoices',   icon: Receipt,    label: 'Invoice Manager'  },
   ]},
   { section: 'Intelligence', items: [
+    { to: '/alerts',  icon: BellDot, label: 'Alerts'                     },
     { to: '/ai',      icon: Bot,     label: 'AI Auditor',    badge: 'AI' },
     { to: '/reports', icon: Library, label: 'Report Library'             },
   ]},
@@ -44,6 +58,7 @@ const NAV = [
 export function Sidebar() {
   const { tenant, market, sidebarOpen, toggleSidebar } = useAppStore()
   const { profile, signOut } = useAuth()
+  const criticalCount = useAlertCount()
   const cfg = MARKET_CONFIGS[market]
 
   if (!sidebarOpen) return null
@@ -93,6 +108,11 @@ export function Sidebar() {
                     {badge && (
                       <span className="text-[10px] font-semibold bg-accent/20 text-accent-hover px-1.5 py-0.5 rounded-full">
                         {badge}
+                      </span>
+                    )}
+                    {to === '/alerts' && criticalCount > 0 && (
+                      <span className="text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                        {criticalCount}
                       </span>
                     )}
                   </>

@@ -69,3 +69,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export const useAuth = () => useContext(AuthContext)
+
+const DEMO_TENANT = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+
+/** Returns the tenant ID of the logged-in user, falling back to the demo tenant. */
+export const useTenantId = () => {
+  const { profile } = useContext(AuthContext)
+  return profile?.id ?? DEMO_TENANT
+}

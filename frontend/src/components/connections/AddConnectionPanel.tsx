@@ -12,8 +12,7 @@ import {
   mixEmissionFactor,
 } from '@/lib/energyMix'
 import { supabase } from '@/lib/supabase'
-
-const DEMO_TENANT = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+import { useTenantId } from '@/lib/auth'
 
 // ─── Form field components ─────────────────────────────────────────────────────
 
@@ -111,6 +110,7 @@ interface Props {
 }
 
 export default function AddConnectionPanel({ onClose, onSave }: Props) {
+  const tenantId = useTenantId()
   const [form, setForm] = useState<FormData>(EMPTY)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -122,7 +122,7 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
     supabase
       .from('sites')
       .select('id, name, city_id, cities(name)')
-      .eq('tenant_id', DEMO_TENANT)
+      .eq('tenant_id', tenantId)
       .order('name')
       .then(({ data }) => {
         setSites((data ?? []).map((s: any) => ({
@@ -164,7 +164,7 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
         const { data: meter, error: mErr } = await supabase
           .from('meters')
           .upsert({
-            tenant_id: DEMO_TENANT,
+            tenant_id: tenantId,
             meter_number: form.meter_number.trim(),
             type: form.monitoring === 'Smart' ? 'Smart' : 'Traditional',
             utility: form.product,
@@ -179,7 +179,7 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
       const { data: conn, error: cErr } = await supabase
         .from('energy_connections')
         .insert({
-          tenant_id:       DEMO_TENANT,
+          tenant_id:       tenantId,
           site_id:         siteId || null,
           site_name:       sites.find(s => s.id === siteId)?.name ?? form.city,
           meter_id:        meterId,

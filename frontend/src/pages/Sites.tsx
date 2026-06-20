@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
-import { useAuth } from '@/lib/auth'
+import { useAuth, useTenantId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { MARKET_CONFIGS, type Market } from '@/types'
 import { CO2_FACTORS, type ElecSource, MONTHS } from '@/lib/mockData'
@@ -858,6 +858,7 @@ function AddSiteModal({
 export default function Sites() {
   const { siteMixes, setCityMarket, getCityMarket, applyMarketToCountry } = useAppStore()
   const { profile } = useAuth()
+  const tenantId = useTenantId()
   const navigate = useNavigate()
   const [sites, setSites]               = useState<DBSite[]>([])
   const [loading, setLoading]           = useState(true)
@@ -1168,7 +1169,7 @@ export default function Sites() {
 
       {showAddSite && (
         <AddSiteModal
-          tenantId={profile?.id ?? 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'}
+          tenantId={tenantId}
           onClose={() => setShowAddSite(false)}
           onCreated={fetchSites}
         />

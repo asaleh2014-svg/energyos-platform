@@ -3,6 +3,7 @@ import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS } from '@/types'
 import { supabase, type InvoiceRow } from '@/lib/supabase'
+import { useTenantId } from '@/lib/auth'
 import { aiApi } from '@/lib/api'
 import {
   Upload, Bot, Download, Search, CheckSquare, AlertTriangle, Clock,
@@ -11,22 +12,20 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 
-const DEMO_TENANT = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
-
 interface SiteOption { id: string; name: string; city: string }
 interface ConnOption { id: string; label: string; site_id: string }
 
-function useSitesAndConnections() {
+function useSitesAndConnections(tenantId: string) {
   const [sites, setSites]  = useState<SiteOption[]>([])
   const [conns, setConns]  = useState<ConnOption[]>([])
   useEffect(() => {
     supabase.from('sites').select('id, name, city_id, cities(name)')
-      .eq('tenant_id', DEMO_TENANT).order('name')
+      .eq('tenant_id', tenantId).order('name')
       .then(({ data }) => setSites((data ?? []).map((s: any) => ({
         id: s.id, name: s.name, city: s.cities?.name ?? '',
       }))))
     supabase.from('energy_connections').select('id, ean_code, connection_type, site_id, site_name')
-      .eq('tenant_id', DEMO_TENANT).order('ean_code')
+      .eq('tenant_id', tenantId).order('ean_code')
       .then(({ data }) => setConns((data ?? []).map((c: any) => ({
         id: c.id,
         label: `${c.ean_code} · ${c.connection_type}${c.site_name ? ` · ${c.site_name}` : ''}`,
@@ -65,8 +64,9 @@ interface AIAnalysis {
 
 export default function Invoices() {
   const { market, aiProvider } = useAppStore()
+  const tenantId = useTenantId()
   const cfg = MARKET_CONFIGS[market]
-  const { sites, conns } = useSitesAndConnections()
+  const { sites, conns } = useSitesAndConnections(tenantId)
 
   const [tab,          setTab]          = useState<PageTab>('list')
   const [invoices,     setInvoices]     = useState<InvoiceRow[]>([])
@@ -783,9 +783,10 @@ function InvoiceDetailPanel({
   onClose: () => void
   onStatusUpdate: () => void
 }) {
+  const tenantId = useTenantId()
   const [checking,   setChecking]   = useState(false)
   const [analysis,   setAnalysis]   = useState<AIAnalysis | null>(null)
-  const { sites, conns } = useSitesAndConnections()
+  const { sites, conns } = useSitesAndConnections(tenantId)
   const [linkSiteId, setLinkSiteId] = useState(inv.site_id ?? '')
   const [linkConnId, setLinkConnId] = useState(inv.connection_id ?? '')
   const [linking,    setLinking]    = useState(false)

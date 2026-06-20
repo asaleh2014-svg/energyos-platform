@@ -17,6 +17,7 @@ import Invoices from '@/pages/Invoices'
 import Settings from '@/pages/Settings'
 import Emissions from '@/pages/Emissions'
 import Budget from '@/pages/Budget'
+import Alerts from '@/pages/Alerts'
 
 const router = createBrowserRouter([
   { path: '/login',  element: <Login /> },
@@ -38,6 +39,7 @@ const router = createBrowserRouter([
           { path: 'meters',     element: <Meters /> },
           { path: 'emissions',  element: <Emissions /> },
           { path: 'budget',     element: <Budget /> },
+          { path: 'alerts',     element: <Alerts /> },
           { path: 'ai',         element: <AIAuditor /> },
           { path: 'reports',    element: <Reports /> },
           { path: 'invoices',   element: <Invoices /> },

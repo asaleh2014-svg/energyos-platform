@@ -2,6 +2,9 @@ import { useState } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { Download, Printer, Play, Plus, Search, RefreshCw, FileText, Globe, Bot } from 'lucide-react'
 import clsx from 'clsx'
+import { supabase } from '@/lib/supabase'
+import { useTenantId } from '@/lib/auth'
+import { useAuth } from '@/lib/auth'
 
 type ReportTab = 'system' | 'custom' | 'templates'
 
@@ -135,7 +138,200 @@ const CATEGORIES = [
   'Carbon Tracking', 'Custom', 'Template',
 ]
 
+// ─── PDF generation ────────────────────────────────────────────────────────────
+async function generatePortfolioPDF(tenantId: string, tenantName: string) {
+  const [sitesRes, connsRes, consRes, anomalyRes] = await Promise.all([
+    supabase.from('sites').select('id, name, status').eq('tenant_id', tenantId),
+    supabase.from('energy_connections').select('id, connection_type, site_name, status').eq('tenant_id', tenantId),
+    supabase.from('consumption_records').select('consumption, unit, cost').eq('tenant_id', tenantId),
+    fetch(`/api/anomalies/${tenantId}`).then(r => r.ok ? r.json() : { anomalies: [] }).catch(() => ({ anomalies: [] })),
+  ])
+
+  const sites   = sitesRes.data ?? []
+  const conns   = connsRes.data ?? []
+  const consRec = consRes.data ?? []
+  const anomalies: any[] = anomalyRes.anomalies ?? []
+
+  const totalElec = consRec.filter(r => r.unit === 'kWh').reduce((s, r) => s + Number(r.consumption), 0)
+  const totalGas  = consRec.filter(r => r.unit === 'm3').reduce((s, r) => s + Number(r.consumption), 0)
+  const totalCost = consRec.reduce((s, r) => s + Number(r.cost), 0)
+  const co2Tonnes = Math.round((totalElec * 0.45 + totalGas * 2.04) / 1000)
+
+  const criticals = anomalies.filter(a => a.severity === 'critical')
+  const warnings  = anomalies.filter(a => a.severity === 'warning')
+
+  const siteRows = sites.map(s => {
+    const sConns = conns.filter(c => c.site_name === s.name).length
+    return `<tr>
+      <td>${s.name}</td>
+      <td style="text-align:center">${sConns}</td>
+      <td style="text-align:center">${s.status ?? 'Active'}</td>
+    </tr>`
+  }).join('')
+
+  const anomalyRows = anomalies.slice(0, 8).map(a => `<tr>
+    <td><span class="badge ${a.severity === 'critical' ? 'badge-critical' : 'badge-warning'}">${a.severity.toUpperCase()}</span></td>
+    <td>${a.period}</td>
+    <td>${a.connection_label}</td>
+    <td>${a.title}</td>
+  </tr>`).join('')
+
+  const now = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'long', year:'numeric' })
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Portfolio KPI Summary — ${tenantName}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a2e; font-size: 11pt; background: white; }
+  @page { size: A4; margin: 18mm 15mm; }
+
+  /* Header */
+  .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 12px; border-bottom: 3px solid #4f46e5; margin-bottom: 20px; }
+  .logo { font-size: 20pt; font-weight: 800; color: #4f46e5; letter-spacing: -0.5px; }
+  .logo span { color: #10b981; }
+  .meta { text-align: right; font-size: 9pt; color: #6b7280; line-height: 1.6; }
+  .meta strong { color: #1a1a2e; font-size: 11pt; display: block; }
+
+  /* Section */
+  .section { margin-bottom: 22px; }
+  .section-title { font-size: 10pt; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #4f46e5; margin-bottom: 10px; padding-bottom: 4px; border-bottom: 1px solid #e5e7eb; }
+
+  /* KPI grid */
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .kpi { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; }
+  .kpi-label { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; margin-bottom: 4px; }
+  .kpi-value { font-size: 16pt; font-weight: 700; color: #1a1a2e; }
+  .kpi-sub { font-size: 8pt; color: #9ca3af; margin-top: 2px; }
+
+  /* Alert KPIs */
+  .kpi.critical { border-color: #fca5a5; background: #fff5f5; }
+  .kpi.critical .kpi-value { color: #dc2626; }
+  .kpi.warning { border-color: #fcd34d; background: #fffbeb; }
+  .kpi.warning .kpi-value { color: #d97706; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+  th { background: #f1f5f9; text-align: left; padding: 7px 10px; font-weight: 600; color: #374151; border-bottom: 2px solid #e2e8f0; }
+  td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; color: #374151; }
+  tr:nth-child(even) td { background: #fafafa; }
+
+  /* Badge */
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 8pt; font-weight: 700; }
+  .badge-critical { background: #fee2e2; color: #dc2626; }
+  .badge-warning  { background: #fef3c7; color: #d97706; }
+
+  /* Footer */
+  .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 8pt; color: #9ca3af; display: flex; justify-content: space-between; }
+
+  /* Print */
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div>
+    <div class="logo">Energy<span>OS</span></div>
+    <div style="font-size:9pt;color:#6b7280;margin-top:3px">Portfolio Intelligence Platform</div>
+  </div>
+  <div class="meta">
+    <strong>${tenantName}</strong>
+    Portfolio KPI Summary Report<br>
+    Generated: ${now}<br>
+    Confidential — Internal Use Only
+  </div>
+</div>
+
+<!-- KPIs -->
+<div class="section">
+  <div class="section-title">Portfolio Overview</div>
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Active Sites</div>
+      <div class="kpi-value">${sites.length}</div>
+      <div class="kpi-sub">${conns.length} connections</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Electricity</div>
+      <div class="kpi-value">${(totalElec / 1000).toFixed(0)} MWh</div>
+      <div class="kpi-sub">${totalElec.toLocaleString()} kWh total</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Total Spend</div>
+      <div class="kpi-value">AED ${(totalCost / 1000).toFixed(0)}K</div>
+      <div class="kpi-sub">${totalCost.toLocaleString()} AED</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">CO₂ Emissions</div>
+      <div class="kpi-value">${co2Tonnes} t</div>
+      <div class="kpi-sub">Scope 1 + 2 estimate</div>
+    </div>
+  </div>
+</div>
+
+<!-- Anomaly summary -->
+<div class="section">
+  <div class="section-title">Anomaly Summary</div>
+  <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:12px">
+    <div class="kpi critical">
+      <div class="kpi-label">Critical Anomalies</div>
+      <div class="kpi-value">${criticals.length}</div>
+      <div class="kpi-sub">Require immediate action</div>
+    </div>
+    <div class="kpi warning">
+      <div class="kpi-label">Warnings</div>
+      <div class="kpi-value">${warnings.length}</div>
+      <div class="kpi-sub">Worth investigating</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Records Scanned</div>
+      <div class="kpi-value">${consRec.length}</div>
+      <div class="kpi-sub">Consumption data points</div>
+    </div>
+  </div>
+  ${anomalies.length > 0 ? `
+  <table>
+    <thead><tr><th>Severity</th><th>Period</th><th>Connection</th><th>Finding</th></tr></thead>
+    <tbody>${anomalyRows}</tbody>
+  </table>` : '<p style="color:#6b7280;font-size:9pt">No anomalies detected in the scanned period.</p>'}
+</div>
+
+<!-- Sites -->
+${sites.length > 0 ? `
+<div class="section">
+  <div class="section-title">Site Register (${sites.length} sites)</div>
+  <table>
+    <thead><tr><th>Site Name</th><th style="text-align:center">Connections</th><th style="text-align:center">Status</th></tr></thead>
+    <tbody>${siteRows}</tbody>
+  </table>
+</div>` : ''}
+
+<!-- Footer -->
+<div class="footer">
+  <span>EnergyOS · Portfolio Intelligence · ${tenantName}</span>
+  <span>Generated ${now} · Confidential</span>
+</div>
+
+</body>
+</html>`
+
+  const win = window.open('', '_blank', 'width=900,height=700')
+  if (!win) { alert('Allow popups to generate PDF reports.'); return }
+  win.document.write(html)
+  win.document.close()
+  setTimeout(() => win.print(), 600)
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 export default function Reports() {
+  const tenantId = useTenantId()
+  const { profile } = useAuth()
+  const tenantName = profile?.name ?? 'EnergyOS Portfolio'
+
   const [tab,      setTab]      = useState<ReportTab>('system')
   const [category, setCategory] = useState('All Categories')
   const [search,   setSearch]   = useState('')
@@ -150,9 +346,14 @@ export default function Reports() {
     return true
   })
 
-  const runReport = (id: string) => {
+  const runReport = async (id: string) => {
     setRunning(id)
-    setTimeout(() => setRunning(null), 2500)
+    if (id === 'r1') {
+      await generatePortfolioPDF(tenantId, tenantName)
+    } else {
+      await new Promise(r => setTimeout(r, 1500))
+    }
+    setRunning(null)
   }
 
   return (
@@ -210,8 +411,11 @@ export default function Reports() {
                 <tr key={r.id} className="tbl-row">
                   <td className="tbl-td">
                     <div className="flex items-center gap-2">
-                      <FileText size={13} className="text-accent/60 flex-shrink-0" />
+                      <FileText size={13} className={clsx('flex-shrink-0', r.id === 'r1' ? 'text-accent' : 'text-accent/60')} />
                       <span className="text-white font-medium text-sm">{r.name}</span>
+                      {r.id === 'r1' && (
+                        <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full font-semibold">LIVE</span>
+                      )}
                     </div>
                   </td>
                   <td className="tbl-td">
@@ -235,13 +439,15 @@ export default function Reports() {
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => runReport(r.id)}
+                        disabled={running === r.id}
                         className={clsx(
                           'btn-sm flex items-center gap-1',
-                          running === r.id ? 'opacity-50 cursor-wait' : ''
+                          running === r.id ? 'opacity-50 cursor-wait' : '',
+                          r.id === 'r1' ? 'text-accent border-accent/40' : ''
                         )}>
                         {running === r.id
                           ? <><RefreshCw size={10} className="animate-spin" /> Running…</>
-                          : <><Play size={10} /> Execute</>}
+                          : <><Play size={10} /> {r.id === 'r1' ? 'Generate PDF' : 'Execute'}</>}
                       </button>
                       <button className="btn-sm"><Printer size={10} /></button>
                       <button className="btn-sm"><Download size={10} /></button>
@@ -260,7 +466,7 @@ export default function Reports() {
           </table>
         </div>
 
-        {/* ── AI Executive Summary (kept from old Reports) ────────────────── */}
+        {/* ── AI Executive Summary ─────────────────────────────────────────── */}
         <div className="mt-5 p-4 rounded-xl border border-accent/20 bg-accent/5 flex items-start gap-3">
           <Bot size={16} className="text-accent mt-0.5 flex-shrink-0" />
           <div className="flex-1">
