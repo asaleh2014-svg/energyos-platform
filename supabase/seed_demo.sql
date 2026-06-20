@@ -4,6 +4,11 @@
 -- Safe to re-run: uses ON CONFLICT DO NOTHING / DO UPDATE
 -- ============================================================
 
+-- ─── Ensure columns exist (safe if already present) ──────────────────────────
+ALTER TABLE energy_connections ADD COLUMN IF NOT EXISTS tenant_id  UUID REFERENCES tenants(id);
+ALTER TABLE energy_connections ADD COLUMN IF NOT EXISTS site_name  TEXT;
+ALTER TABLE invoices           ADD COLUMN IF NOT EXISTS tenant_id  UUID REFERENCES tenants(id);
+
 -- ─── Energy connections (2 per site) ─────────────────────────────────────────
 INSERT INTO energy_connections (id, tenant_id, site_id, site_name, ean_code, connection_type, capacity, status, meter_id)
 VALUES
