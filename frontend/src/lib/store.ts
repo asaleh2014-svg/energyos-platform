@@ -45,7 +45,7 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
-      market:      'UAE',
+      market:      'UAE-DXB',
       cityMarkets: {},
       aiProvider:  'claude',
       energyUnit:  'kWh',
@@ -55,7 +55,7 @@ export const useAppStore = create<AppState>()(
         id:                'tenant-demo',
         name:              'Masdar City Group',
         plan:              'professional',
-        market:            'UAE',
+        market:            'UAE-DXB',
         currency:          'AED',
         connections_count: 15,
         created_at:        '2024-01-01',

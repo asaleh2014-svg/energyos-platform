@@ -875,6 +875,7 @@ export default function Sites() {
     const { data } = await supabase
       .from('sites')
       .select('id, name, status, created_at, city_id, cities(id, name, countries(id, name, code))')
+      .eq('tenant_id', tenantId)
       .order('name')
     setSites((data as unknown as DBSite[]) ?? [])
     setLoading(false)

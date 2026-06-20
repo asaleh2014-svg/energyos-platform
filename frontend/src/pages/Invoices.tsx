@@ -93,6 +93,9 @@ export default function Invoices() {
   const [uploadSiteId,  setUploadSiteId]  = useState('')
   const [uploadConnId,  setUploadConnId]  = useState('')
 
+  // Anomaly toast
+  const [anomalyToast, setAnomalyToast] = useState<string | null>(null)
+
   // Bulk AI check state
   const [bulkChecking, setBulkChecking] = useState(false)
   const [bulkResults,  setBulkResults]  = useState<Record<string, AIAnalysis>>({})
@@ -102,6 +105,7 @@ export default function Invoices() {
     const { data, error } = await supabase
       .from('invoices')
       .select('*')
+      .eq('tenant_id', tenantId)
       .order('created_at', { ascending: false })
     if (!error && data) setInvoices(data as InvoiceRow[])
     setLoading(false)
@@ -163,7 +167,14 @@ export default function Invoices() {
           setAnalyzing(true)
           try {
             const result = await aiApi.analyzeInvoice(d, market, aiProvider)
-            if (result.success) setAiAnalysis(result.analysis)
+            if (result.success) {
+              setAiAnalysis(result.analysis)
+              if (result.analysis?.status === 'Anomaly') {
+                const reason = result.analysis.anomaly_reason ?? result.analysis.findings?.[0] ?? 'Anomaly detected'
+                setAnomalyToast(reason)
+                setTimeout(() => setAnomalyToast(null), 10000)
+              }
+            }
           } catch { /* silently ignore */ }
           setAnalyzing(false)
         }
@@ -195,6 +206,7 @@ export default function Invoices() {
     const status = aiAnalysis?.status ?? 'Pending'
 
     const { error: dbErr } = await supabase.from('invoices').insert({
+      tenant_id:        tenantId,
       nus_ref:          `NUS-${Date.now().toString().slice(-5)}`,
       supplier:         form.supplier || null,
       doc_type:         form.doc_type,
@@ -256,6 +268,21 @@ export default function Invoices() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <Topbar title="Invoice Manager" subtitle="AP payment schedule · invoice ingestion & AI validation" />
+
+      {/* Anomaly alert toast */}
+      {anomalyToast && (
+        <div className="mx-6 mt-4 flex items-start gap-3 p-4 bg-danger/10 border border-danger/40 rounded-xl text-sm">
+          <AlertTriangle size={16} className="text-danger-light mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <span className="font-semibold text-danger-light">Invoice Anomaly Detected — </span>
+            <span className="text-white/70">{anomalyToast}</span>
+          </div>
+          <button onClick={() => setAnomalyToast(null)} className="text-white/30 hover:text-white/60 ml-2">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-6">
 
         {/* ── KPI banner ─────────────────────────────────────────────────── */}
