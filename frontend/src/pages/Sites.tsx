@@ -9,7 +9,7 @@ import { CO2_FACTORS, type ElecSource, MONTHS } from '@/lib/mockData'
 import {
   MapPin, X, Search, Globe, CopyCheck, ChevronDown, ChevronUp,
   Plus, Building2, Zap, Loader2, Trash2, RefreshCw, AlertCircle,
-  Flame, ExternalLink, Hotel, ChevronRight,
+  Flame, ExternalLink, Hotel, ChevronRight, Table, DollarSign, Wind,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -133,11 +133,34 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
   const [mix, setMix] = useState<ElecSource>(siteMixes[site.id] ?? DEFAULT_MIX)
   const [applied, setApplied] = useState<null | 'site' | 'city'>(null)
   const [period, setPeriod] = useState<Period>(DEFAULT_PERIOD)
+  const [showConsTable,  setShowConsTable]  = useState(false)
+  const [showCostTable,  setShowCostTable]  = useState(false)
+  const [showEmitTable,  setShowEmitTable]  = useState(false)
 
   const factor = calcEmissionFactor(mix)
   const factorColor = factor < 0.15 ? '#10b981' : factor < 0.35 ? '#f59e0b' : '#ef4444'
   const total = mix.gas_fired + mix.coal + mix.renewable + mix.mix
   const isValid = total === 100
+
+  const consumption = useMemo(() => siteConsumption(site.id, period), [site.id, period])
+  const totals = prevYearTotals(site.id)
+
+  // Cost tariffs (UAE commercial)
+  const ELEC_TARIFF = 0.38  // AED / kWh
+  const GAS_TARIFF  = 3.20  // AED / m³
+  const GAS_CO2     = 2.04  // kgCO₂ / m³
+
+  const costData = useMemo(() => consumption.map(r => ({
+    month:    r.month,
+    elecCost: Math.round(r.elec * ELEC_TARIFF),
+    gasCost:  Math.round(r.gas  * GAS_TARIFF),
+  })), [consumption])
+
+  const emissionsData = useMemo(() => consumption.map(r => ({
+    month:   r.month,
+    elecCO2: parseFloat((r.elec * factor).toFixed(1)),
+    gasCO2:  parseFloat((r.gas  * GAS_CO2).toFixed(1)),
+  })), [consumption, factor])
 
   const updateField = (field: keyof ElecSource, v: number) => {
     setMix(m => ({ ...m, [field]: v }))
@@ -153,9 +176,6 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
     citySiteIds.forEach(id => setSiteMix(id, mix))
     setApplied('city')
   }
-
-  const consumption = useMemo(() => siteConsumption(site.id, period), [site.id, period])
-  const totals = prevYearTotals(site.id)
 
   const TT = { background: '#0d2b35', border: '1px solid #1a5568', borderRadius: 8, fontSize: 11 }
 
@@ -206,11 +226,16 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
             </div>
           </div>
 
-          {/* Consumption chart */}
+          {/* ── Consumption ───────────────────────────── */}
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-semibold text-white/50 uppercase tracking-widest">Consumption</span>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <Zap size={12} className="text-blue-400" />
+              <span className="text-xs font-semibold text-white/70 uppercase tracking-widest">Consumption</span>
               <PeriodSelector value={period} onChange={setPeriod} />
+              <button onClick={() => setShowConsTable(v => !v)}
+                className="flex items-center gap-1 text-[11px] text-white/40 hover:text-white/60 border border-border-subtle px-2 py-0.5 rounded-lg transition-colors ml-auto">
+                <Table size={10} /> {showConsTable ? 'Hide' : 'Table'}
+              </button>
             </div>
             <div className="card p-3">
               <ResponsiveContainer width="100%" height={160}>
@@ -226,42 +251,159 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-
-            {/* Consumption table */}
-            <div className="card p-0 overflow-hidden mt-2">
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="border-b border-border-subtle">
-                    <th className="tbl-th">Month</th>
-                    <th className="tbl-th text-right">Elec (kWh)</th>
-                    <th className="tbl-th text-right">Gas (m³)</th>
-                    <th className="tbl-th text-right">CO₂ (kg)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {consumption.map((r, i) => (
-                    <tr key={i} className="tbl-row">
-                      <td className="tbl-td text-white/70">{r.month}</td>
-                      <td className="tbl-td text-right font-mono text-blue-300">{r.elec.toLocaleString()}</td>
-                      <td className="tbl-td text-right font-mono text-amber-300">{r.gas.toLocaleString()}</td>
-                      <td className="tbl-td text-right font-mono text-white/50">
-                        {Math.round(r.elec * factor).toLocaleString()}
-                      </td>
+            {showConsTable && (
+              <div className="card p-0 overflow-hidden mt-2">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b border-border-subtle">
+                      <th className="tbl-th">Period</th>
+                      <th className="tbl-th text-right">Elec (kWh)</th>
+                      <th className="tbl-th text-right">Gas (m³)</th>
+                      <th className="tbl-th text-right">CO₂ (kg)</th>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-border-default bg-bg-card">
-                    <td className="tbl-td font-bold text-white/50">Total</td>
-                    <td className="tbl-td text-right font-bold font-mono text-blue-300">{totals.elec.toLocaleString()}</td>
-                    <td className="tbl-td text-right font-bold font-mono text-amber-300">{totals.gas.toLocaleString()}</td>
-                    <td className="tbl-td text-right font-bold font-mono text-white/50">
-                      {Math.round(totals.elec * factor).toLocaleString()}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
+                  </thead>
+                  <tbody>
+                    {consumption.map((r, i) => (
+                      <tr key={i} className="tbl-row">
+                        <td className="tbl-td text-white/70">{r.month}</td>
+                        <td className="tbl-td text-right font-mono text-blue-300">{r.elec.toLocaleString()}</td>
+                        <td className="tbl-td text-right font-mono text-amber-300">{r.gas.toLocaleString()}</td>
+                        <td className="tbl-td text-right font-mono text-white/50">{Math.round(r.elec * factor).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border-default bg-bg-card">
+                      <td className="tbl-td font-bold text-white/50">Total</td>
+                      <td className="tbl-td text-right font-bold font-mono text-blue-300">{consumption.reduce((a,r)=>a+r.elec,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-amber-300">{consumption.reduce((a,r)=>a+r.gas,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-white/50">{Math.round(consumption.reduce((a,r)=>a+r.elec,0)*factor).toLocaleString()}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── Cost ──────────────────────────────────── */}
+          <div>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <DollarSign size={12} className="text-emerald-400" />
+              <span className="text-xs font-semibold text-white/70 uppercase tracking-widest">Cost (AED)</span>
+              <span className="text-[10px] text-white/25 ml-1">same period</span>
+              <button onClick={() => setShowCostTable(v => !v)}
+                className="flex items-center gap-1 text-[11px] text-white/40 hover:text-white/60 border border-border-subtle px-2 py-0.5 rounded-lg transition-colors ml-auto">
+                <Table size={10} /> {showCostTable ? 'Hide' : 'Table'}
+              </button>
             </div>
+            <div className="card p-3">
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={costData} barGap={2} barCategoryGap="25%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" vertical={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 9, fill: '#6b8fa3' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 9, fill: '#6b8fa3' }} axisLine={false} tickLine={false}
+                    tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
+                  <Tooltip contentStyle={TT} formatter={(v: number) => [`AED ${v.toLocaleString()}`, '']} />
+                  <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="elecCost" name="Electricity (AED)" stackId="a" fill="#10b981" opacity={0.85} radius={[0,0,0,0]} />
+                  <Bar dataKey="gasCost"  name="Gas (AED)"          stackId="a" fill="#34d399" opacity={0.70} radius={[2,2,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            {showCostTable && (
+              <div className="card p-0 overflow-hidden mt-2">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b border-border-subtle">
+                      <th className="tbl-th">Period</th>
+                      <th className="tbl-th text-right">Elec (AED)</th>
+                      <th className="tbl-th text-right">Gas (AED)</th>
+                      <th className="tbl-th text-right">Total (AED)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {costData.map((r, i) => (
+                      <tr key={i} className="tbl-row">
+                        <td className="tbl-td text-white/70">{r.month}</td>
+                        <td className="tbl-td text-right font-mono text-emerald-300">{r.elecCost.toLocaleString()}</td>
+                        <td className="tbl-td text-right font-mono text-emerald-300/60">{r.gasCost.toLocaleString()}</td>
+                        <td className="tbl-td text-right font-mono font-semibold text-white">{(r.elecCost+r.gasCost).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border-default bg-bg-card">
+                      <td className="tbl-td font-bold text-white/50">Total</td>
+                      <td className="tbl-td text-right font-bold font-mono text-emerald-300">{costData.reduce((a,r)=>a+r.elecCost,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-emerald-300/60">{costData.reduce((a,r)=>a+r.gasCost,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-white">{costData.reduce((a,r)=>a+r.elecCost+r.gasCost,0).toLocaleString()}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── Emissions ─────────────────────────────── */}
+          <div>
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <Wind size={12} className="text-purple-400" />
+              <span className="text-xs font-semibold text-white/70 uppercase tracking-widest">CO₂ Emissions (kg)</span>
+              <span className="text-[10px] text-white/25 ml-1">same period</span>
+              <button onClick={() => setShowEmitTable(v => !v)}
+                className="flex items-center gap-1 text-[11px] text-white/40 hover:text-white/60 border border-border-subtle px-2 py-0.5 rounded-lg transition-colors ml-auto">
+                <Table size={10} /> {showEmitTable ? 'Hide' : 'Table'}
+              </button>
+            </div>
+            <div className="card p-3">
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={emissionsData} barGap={2} barCategoryGap="25%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" vertical={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 9, fill: '#6b8fa3' }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 9, fill: '#6b8fa3' }} axisLine={false} tickLine={false}
+                    tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(1)}t` : String(v)} />
+                  <Tooltip contentStyle={TT} formatter={(v: number) => [`${v.toLocaleString()} kg`, '']} />
+                  <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                  <Bar dataKey="elecCO2" name="Elec CO₂ (kg)" stackId="e" fill="#a855f7" opacity={0.85} radius={[0,0,0,0]} />
+                  <Bar dataKey="gasCO2"  name="Gas CO₂ (kg)"  stackId="e" fill="#c084fc" opacity={0.70} radius={[2,2,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            {showEmitTable && (
+              <div className="card p-0 overflow-hidden mt-2">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b border-border-subtle">
+                      <th className="tbl-th">Period</th>
+                      <th className="tbl-th text-right">Elec CO₂ (kg)</th>
+                      <th className="tbl-th text-right">Gas CO₂ (kg)</th>
+                      <th className="tbl-th text-right">Total (kg)</th>
+                      <th className="tbl-th text-right">tCO₂</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {emissionsData.map((r, i) => (
+                      <tr key={i} className="tbl-row">
+                        <td className="tbl-td text-white/70">{r.month}</td>
+                        <td className="tbl-td text-right font-mono text-purple-300">{r.elecCO2.toLocaleString()}</td>
+                        <td className="tbl-td text-right font-mono text-purple-300/60">{r.gasCO2.toLocaleString()}</td>
+                        <td className="tbl-td text-right font-mono font-semibold text-white">{(r.elecCO2+r.gasCO2).toLocaleString()}</td>
+                        <td className="tbl-td text-right font-mono text-white/50">{((r.elecCO2+r.gasCO2)/1000).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border-default bg-bg-card">
+                      <td className="tbl-td font-bold text-white/50">Total</td>
+                      <td className="tbl-td text-right font-bold font-mono text-purple-300">{emissionsData.reduce((a,r)=>a+r.elecCO2,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-purple-300/60">{emissionsData.reduce((a,r)=>a+r.gasCO2,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-white">{emissionsData.reduce((a,r)=>a+r.elecCO2+r.gasCO2,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-white/50">{(emissionsData.reduce((a,r)=>a+r.elecCO2+r.gasCO2,0)/1000).toFixed(2)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Energy mix editor */}
@@ -1024,9 +1166,9 @@ export default function Sites() {
         })}
       </div>
 
-      {showAddSite && profile && (
+      {showAddSite && (
         <AddSiteModal
-          tenantId={profile.id}
+          tenantId={profile?.id ?? 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'}
           onClose={() => setShowAddSite(false)}
           onCreated={fetchSites}
         />

@@ -21,5 +21,7 @@ export type InvoiceRow = {
   file_path: string | null
   file_name: string | null
   notes: string | null
+  site_id: string | null
+  connection_id: string | null
   created_at: string
 }

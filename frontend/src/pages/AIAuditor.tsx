@@ -4,6 +4,8 @@ import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS, type AIProvider, type Market } from '@/types'
 import { supabase } from '@/lib/supabase'
 import { aiApi } from '@/lib/api'
+import { MOCK_SITES, MOCK_CONNECTIONS, CONSUMPTION_MONTHLY, MONTHS } from '@/lib/mockData'
+import { mockBuildingsForSite } from '@/lib/buildingMocks'
 import { Send, Bot, RefreshCw, Download, Trash2 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -61,9 +63,13 @@ function buildContext(data: PortfolioContext, flags: Record<string, boolean>): s
   }
 
   if (flags['Fleet data'] && data.connections.length > 0) {
-    lines.push(`--- CONNECTIONS (${data.connections.length} meters) ---`)
+    lines.push(`--- CONNECTIONS / METERS (${data.connections.length} meters) ---`)
     data.connections.forEach((c: any) => {
-      lines.push(`  • ${c.meter_number ?? c.id} | ${c.product} | Site: ${c.name} | Status: ${c.status} | Monitoring: ${c.monitoring}`)
+      const meterNum = c.meter?.meter_number ?? c.meter_number ?? c.ean_code ?? c.id
+      const type = c.connection_type ?? c.product ?? 'Unknown'
+      const site = c.site_name ?? c.name ?? c.site_id ?? '?'
+      const cap = c.capacity ? ` | Capacity: ${c.capacity}` : ''
+      lines.push(`  • Meter: ${meterNum} | Type: ${type} | Site: ${site} | Status: ${c.status}${cap}`)
     })
     lines.push('')
   }
@@ -71,7 +77,16 @@ function buildContext(data: PortfolioContext, flags: Record<string, boolean>): s
   if (flags['Sites'] && data.sites.length > 0) {
     lines.push(`--- SITES (${data.sites.length} locations) ---`)
     data.sites.forEach((s: any) => {
-      lines.push(`  • ${s.name} | Status: ${s.status}`)
+      const budget = s.annual_budget ? ` | Budget: AED ${s.annual_budget.toLocaleString()}/yr` : ''
+      const city = s.city ? ` | City: ${s.city}` : ''
+      const conns = s.connections_count ? ` | Connections: ${s.connections_count}` : ''
+      lines.push(`  • ${s.name} | Status: ${s.status}${city}${conns}${budget}`)
+      // Include buildings if present
+      if (s.buildings?.length > 0) {
+        s.buildings.forEach((b: any) => {
+          lines.push(`    ↳ Building: ${b.name} | Area: ${b.area_m2.toLocaleString()} m² | Floors: ${b.floors} | Label: ${b.energy_label} | Elec: ${b.elec_kwh_year.toLocaleString()} kWh/yr | Gas: ${b.gas_m3_year.toLocaleString()} m³/yr | EUI: ${(b.elec_kwh_year/b.area_m2).toFixed(1)} kWh/m²`)
+        })
+      }
     })
     lines.push('')
   }
@@ -113,7 +128,7 @@ export default function AIAuditor() {
   const [showQuick,setShowQuick]= useState(true)
   const msgsRef = useRef<HTMLDivElement>(null)
 
-  // ── Load real data from Supabase ────────────────────────────────────────
+  // ── Load real data from Supabase, fall back to mock data ───────────────
   const loadPortfolioData = async () => {
     setLoadingData(true)
     const [{ data: invoices }, { data: sites }, { data: connections }, { data: consumption }] = await Promise.all([
@@ -124,9 +139,16 @@ export default function AIAuditor() {
     ])
 
     const inv  = invoices    ?? []
-    const sit  = sites       ?? []
-    const conn = connections ?? []
-    const cons = consumption ?? []
+    // Use mock data when Supabase tables are empty (pre-migration state)
+    const sit  = (sites       ?? []).length > 0 ? (sites ?? []) : MOCK_SITES.map(s => ({ ...s, buildings: mockBuildingsForSite(s.id, 3) }))
+    const conn = (connections ?? []).length > 0 ? (connections ?? []) : MOCK_CONNECTIONS
+    const cons = (consumption ?? []).length > 0 ? (consumption ?? []) : MONTHS.map((m, i) => ({
+      period_start: `2025-${String(i+1).padStart(2,'0')}-01`,
+      period_end:   `2025-${String(i+1).padStart(2,'0')}-28`,
+      unit: 'kWh',
+      consumption: CONSUMPTION_MONTHLY.electricity[i],
+      cost: Math.round(CONSUMPTION_MONTHLY.electricity[i] * 0.38),
+    }))
 
     setPortfolio({ invoices: inv, sites: sit, connections: conn, consumption: cons, loaded: true })
     setLoadingData(false)
@@ -164,10 +186,11 @@ export default function AIAuditor() {
       const history = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }))
       const data = await aiApi.chat(history, aiProvider, localMarket, context)
       setMessages(prev => [...prev, { role: 'assistant', content: data.content }])
-    } catch {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: '⚠️ Could not reach the AI backend. Make sure the backend server is running on port 3001.',
+        content: `⚠️ Error: ${msg}`,
       }])
     } finally {
       setLoading(false)

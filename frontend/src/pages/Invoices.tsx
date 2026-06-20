@@ -7,8 +7,34 @@ import { aiApi } from '@/lib/api'
 import {
   Upload, Bot, Download, Search, CheckSquare, AlertTriangle, Clock,
   FileText, RefreshCw, X, ExternalLink, Eye, CheckCircle, Zap, List,
+  MapPin, Link2,
 } from 'lucide-react'
 import clsx from 'clsx'
+
+const DEMO_TENANT = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+
+interface SiteOption { id: string; name: string; city: string }
+interface ConnOption { id: string; label: string; site_id: string }
+
+function useSitesAndConnections() {
+  const [sites, setSites]  = useState<SiteOption[]>([])
+  const [conns, setConns]  = useState<ConnOption[]>([])
+  useEffect(() => {
+    supabase.from('sites').select('id, name, city_id, cities(name)')
+      .eq('tenant_id', DEMO_TENANT).order('name')
+      .then(({ data }) => setSites((data ?? []).map((s: any) => ({
+        id: s.id, name: s.name, city: s.cities?.name ?? '',
+      }))))
+    supabase.from('energy_connections').select('id, ean_code, connection_type, site_id, site_name')
+      .eq('tenant_id', DEMO_TENANT).order('ean_code')
+      .then(({ data }) => setConns((data ?? []).map((c: any) => ({
+        id: c.id,
+        label: `${c.ean_code} · ${c.connection_type}${c.site_name ? ` · ${c.site_name}` : ''}`,
+        site_id: c.site_id,
+      }))))
+  }, [])
+  return { sites, conns }
+}
 
 type PageTab = 'list' | 'schedule' | 'upload'
 
@@ -40,6 +66,7 @@ interface AIAnalysis {
 export default function Invoices() {
   const { market, aiProvider } = useAppStore()
   const cfg = MARKET_CONFIGS[market]
+  const { sites, conns } = useSitesAndConnections()
 
   const [tab,          setTab]          = useState<PageTab>('list')
   const [invoices,     setInvoices]     = useState<InvoiceRow[]>([])
@@ -62,7 +89,9 @@ export default function Invoices() {
     supplier: '', doc_type: 'Invoice', tax_date: '', payment_due: '',
     customer_account: '', amount_ex_vat: '', vat_amount: '', notes: '',
   })
-  const [pickedFile, setPickedFile] = useState<File | null>(null)
+  const [pickedFile,    setPickedFile]    = useState<File | null>(null)
+  const [uploadSiteId,  setUploadSiteId]  = useState('')
+  const [uploadConnId,  setUploadConnId]  = useState('')
 
   // Bulk AI check state
   const [bulkChecking, setBulkChecking] = useState(false)
@@ -178,6 +207,8 @@ export default function Invoices() {
       status,
       file_path:        filePath,
       file_name:        pickedFile.name,
+      site_id:          uploadSiteId   || null,
+      connection_id:    uploadConnId   || null,
       notes:            (aiAnalysis?.anomaly_reason
         ? `AI: ${aiAnalysis.anomaly_reason}. `
         : '') + (form.notes || ''),
@@ -189,6 +220,7 @@ export default function Invoices() {
     fetchInvoices()
     setTimeout(() => {
       setPickedFile(null); setUploadStep('idle'); setExtractedLineItems([]); setAiAnalysis(null)
+      setUploadSiteId(''); setUploadConnId('')
       setForm({ supplier:'', doc_type:'Invoice', tax_date:'', payment_due:'',
                 customer_account:'', amount_ex_vat:'', vat_amount:'', notes:'' })
       setTab('list')
@@ -607,6 +639,43 @@ export default function Invoices() {
                 </div>
               )}
 
+              {/* Site + Connection linking */}
+              <div className="bg-accent/5 border border-accent/20 rounded-xl p-4 mb-4 space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Link2 size={12} className="text-accent" />
+                  <span className="text-xs font-semibold text-white/70 uppercase tracking-widest">Link to Site / Meter</span>
+                  <span className="text-[10px] text-white/30 ml-1">optional but recommended</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label mb-1 block">Site</label>
+                    <select value={uploadSiteId} onChange={e => { setUploadSiteId(e.target.value); setUploadConnId('') }}
+                      className="form-select w-full text-xs">
+                      <option value="">— No site —</option>
+                      {sites.map(s => <option key={s.id} value={s.id}>{s.name}{s.city ? ` · ${s.city}` : ''}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label mb-1 block">Connection / Meter</label>
+                    <select value={uploadConnId} onChange={e => setUploadConnId(e.target.value)}
+                      className="form-select w-full text-xs">
+                      <option value="">— No meter —</option>
+                      {(uploadSiteId
+                        ? conns.filter(c => c.site_id === uploadSiteId)
+                        : conns
+                      ).map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {uploadSiteId && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-accent-hover">
+                    <MapPin size={10} />
+                    Linked to: <strong>{sites.find(s => s.id === uploadSiteId)?.name}</strong>
+                    {uploadConnId && <> · {conns.find(c => c.id === uploadConnId)?.label.split(' · ')[0]}</>}
+                  </div>
+                )}
+              </div>
+
               {/* Invoice details form */}
               <div className="grid grid-cols-2 gap-3 mb-4">
                 {[
@@ -714,8 +783,25 @@ function InvoiceDetailPanel({
   onClose: () => void
   onStatusUpdate: () => void
 }) {
-  const [checking, setChecking] = useState(false)
-  const [analysis, setAnalysis] = useState<AIAnalysis | null>(null)
+  const [checking,   setChecking]   = useState(false)
+  const [analysis,   setAnalysis]   = useState<AIAnalysis | null>(null)
+  const { sites, conns } = useSitesAndConnections()
+  const [linkSiteId, setLinkSiteId] = useState(inv.site_id ?? '')
+  const [linkConnId, setLinkConnId] = useState(inv.connection_id ?? '')
+  const [linking,    setLinking]    = useState(false)
+  const [linkSaved,  setLinkSaved]  = useState(false)
+
+  const saveLink = async () => {
+    setLinking(true)
+    await supabase.from('invoices').update({
+      site_id:       linkSiteId       || null,
+      connection_id: linkConnId       || null,
+    }).eq('id', inv.id)
+    setLinking(false)
+    setLinkSaved(true)
+    setTimeout(() => setLinkSaved(false), 2000)
+    onStatusUpdate()
+  }
 
   const runCheck = async () => {
     setChecking(true)
@@ -798,6 +884,39 @@ function InvoiceDetailPanel({
                   <span className="text-white/80 text-right truncate">{r.value ?? '—'}</span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Site / Connection linking */}
+          <div className="card bg-bg-secondary">
+            <div className="flex items-center gap-2 mb-3">
+              <Link2 size={12} className="text-accent" />
+              <div className="text-xs text-white/40 font-semibold uppercase tracking-wider">Site / Meter</div>
+            </div>
+            <div className="space-y-2">
+              <div>
+                <label className="label mb-1 block">Site</label>
+                <select value={linkSiteId} onChange={e => { setLinkSiteId(e.target.value); setLinkConnId('') }}
+                  className="form-select w-full text-xs">
+                  <option value="">— Unlinked —</option>
+                  {sites.map(s => <option key={s.id} value={s.id}>{s.name}{s.city ? ` · ${s.city}` : ''}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label mb-1 block">Connection / Meter</label>
+                <select value={linkConnId} onChange={e => setLinkConnId(e.target.value)}
+                  className="form-select w-full text-xs">
+                  <option value="">— No meter —</option>
+                  {(linkSiteId ? conns.filter(c => c.site_id === linkSiteId) : conns)
+                    .map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                </select>
+              </div>
+              <button onClick={saveLink} disabled={linking}
+                className="btn-primary w-full text-xs flex items-center justify-center gap-1.5 disabled:opacity-50">
+                {linking ? <><RefreshCw size={11} className="animate-spin" /> Saving…</>
+                  : linkSaved ? <>✓ Saved</>
+                  : <><Link2 size={11} /> Save link</>}
+              </button>
             </div>
           </div>
 

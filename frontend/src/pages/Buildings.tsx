@@ -4,7 +4,7 @@ import { Topbar } from '@/components/layout/Topbar'
 import {
   Hotel, MapPin, Zap, Flame, Leaf, Award, ChevronRight,
   BarChart3, Users, Thermometer, Droplets, Wind, ArrowLeft,
-  Building2,
+  Building2, Table,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -33,7 +33,8 @@ function LabelBadge({ label }: { label: EnergyLabel }) {
 
 function BuildingDetail({ building }: { building: MockBuilding }) {
   const navigate = useNavigate()
-  const [period, setPeriod] = useState<Period>(DEFAULT_PERIOD)
+  const [period, setPeriod]     = useState<Period>(DEFAULT_PERIOD)
+  const [showTable, setShowTable] = useState(false)
   const monthly  = useMemo(() => buildingMonthly(building, period), [building, period])
   const eff      = (building.elec_kwh_year / building.area_m2).toFixed(1)
   const co2      = (building.elec_kwh_year * 0.233 / 1000).toFixed(1)
@@ -129,9 +130,13 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
         </div>
 
         <div className="card">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
             <span className="text-xs font-semibold text-white/50 uppercase tracking-widest">Consumption</span>
             <PeriodSelector value={period} onChange={setPeriod} />
+            <button onClick={() => setShowTable(v => !v)}
+              className="flex items-center gap-1 text-[11px] text-white/40 hover:text-white/60 border border-border-subtle px-2 py-0.5 rounded-lg transition-colors ml-auto">
+              <Table size={10} /> {showTable ? 'Hide' : 'Table'}
+            </button>
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={monthly} barGap={2} barCategoryGap="30%">
@@ -147,39 +152,41 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
           </ResponsiveContainer>
         </div>
 
-        <div className="card p-0 overflow-hidden">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="border-b border-border-subtle">
-                <th className="tbl-th">Month</th>
-                <th className="tbl-th text-right">Elec (kWh)</th>
-                <th className="tbl-th text-right">Gas (m³)</th>
-                <th className="tbl-th text-right">kWh/m²</th>
-                <th className="tbl-th text-right">CO₂ (kg)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monthly.map((r, i) => (
-                <tr key={i} className="tbl-row">
-                  <td className="tbl-td text-white/70">{r.month}</td>
-                  <td className="tbl-td text-right font-mono text-blue-300">{r.elec.toLocaleString()}</td>
-                  <td className="tbl-td text-right font-mono text-amber-300">{r.gas.toLocaleString()}</td>
-                  <td className="tbl-td text-right font-mono text-green-300">{(r.elec / building.area_m2).toFixed(1)}</td>
-                  <td className="tbl-td text-right font-mono text-white/50">{Math.round(r.elec * 0.233).toLocaleString()}</td>
+        {showTable && (
+          <div className="card p-0 overflow-hidden">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-border-subtle">
+                  <th className="tbl-th">Period</th>
+                  <th className="tbl-th text-right">Elec (kWh)</th>
+                  <th className="tbl-th text-right">Gas (m³)</th>
+                  <th className="tbl-th text-right">kWh/m²</th>
+                  <th className="tbl-th text-right">CO₂ (kg)</th>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t-2 border-border-default bg-bg-card">
-                <td className="tbl-td font-bold text-white/50">Total</td>
-                <td className="tbl-td text-right font-bold font-mono text-blue-300">{building.elec_kwh_year.toLocaleString()}</td>
-                <td className="tbl-td text-right font-bold font-mono text-amber-300">{building.gas_m3_year.toLocaleString()}</td>
-                <td className="tbl-td text-right font-bold font-mono text-green-300">{eff}</td>
-                <td className="tbl-td text-right font-bold font-mono text-white/50">{Math.round(building.elec_kwh_year * 0.233).toLocaleString()}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {monthly.map((r, i) => (
+                  <tr key={i} className="tbl-row">
+                    <td className="tbl-td text-white/70">{r.month}</td>
+                    <td className="tbl-td text-right font-mono text-blue-300">{r.elec.toLocaleString()}</td>
+                    <td className="tbl-td text-right font-mono text-amber-300">{r.gas.toLocaleString()}</td>
+                    <td className="tbl-td text-right font-mono text-green-300">{(r.elec / building.area_m2).toFixed(1)}</td>
+                    <td className="tbl-td text-right font-mono text-white/50">{Math.round(r.elec * 0.233).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-border-default bg-bg-card">
+                  <td className="tbl-td font-bold text-white/50">Total</td>
+                  <td className="tbl-td text-right font-bold font-mono text-blue-300">{monthly.reduce((a,r)=>a+r.elec,0).toLocaleString()}</td>
+                  <td className="tbl-td text-right font-bold font-mono text-amber-300">{monthly.reduce((a,r)=>a+r.gas,0).toLocaleString()}</td>
+                  <td className="tbl-td text-right font-bold font-mono text-green-300">{eff}</td>
+                  <td className="tbl-td text-right font-bold font-mono text-white/50">{Math.round(monthly.reduce((a,r)=>a+r.elec,0)*0.233).toLocaleString()}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
 
       </div>
     </div>

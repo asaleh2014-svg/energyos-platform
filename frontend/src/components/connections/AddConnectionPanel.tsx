@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, ChevronDown, ChevronRight, Plus, Leaf, RotateCcw } from 'lucide-react'
+import { X, ChevronDown, ChevronRight, Plus, Leaf, RotateCcw, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import type { FullConnection } from '@/lib/connectionsData'
 import {
@@ -9,8 +9,11 @@ import {
 } from '@/lib/connectionsData'
 import {
   type EnergyMix, resolveConnectionMix, MIX_LABELS, MIX_COLORS,
-  mixEmissionFactor, cityMix,
+  mixEmissionFactor,
 } from '@/lib/energyMix'
+import { supabase } from '@/lib/supabase'
+
+const DEMO_TENANT = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
 
 // ─── Form field components ─────────────────────────────────────────────────────
 
@@ -109,6 +112,26 @@ interface Props {
 
 export default function AddConnectionPanel({ onClose, onSave }: Props) {
   const [form, setForm] = useState<FormData>(EMPTY)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [sites, setSites] = useState<{ id: string; name: string; city: string }[]>([])
+  const [siteId, setSiteId] = useState('')
+
+  // Load sites from Supabase for the site picker
+  useEffect(() => {
+    supabase
+      .from('sites')
+      .select('id, name, city_id, cities(name)')
+      .eq('tenant_id', DEMO_TENANT)
+      .order('name')
+      .then(({ data }) => {
+        setSites((data ?? []).map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          city: s.cities?.name ?? s.city ?? '',
+        })))
+      })
+  }, [])
 
   const f = <K extends keyof FormData>(key: K) => (val: FormData[K]) =>
     setForm(prev => ({ ...prev, [key]: val }))
@@ -130,16 +153,55 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
   const emissionFactor = mixEmissionFactor(activeMix)
   const annualCO2 = ((form.usage_normal + form.usage_low) * emissionFactor / 1000).toFixed(1)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const { mix_override, ...rest } = form
-    const newConn: FullConnection = {
-      ...rest,
-      id: `conn-${Date.now()}`,
-      latitude: 25.2048,
-      longitude: 55.2708,
+    setSaveError('')
+    setSaving(true)
+    try {
+      // 1. Upsert meter if meter_number provided
+      let meterId: string | null = null
+      if (form.meter_number.trim()) {
+        const { data: meter, error: mErr } = await supabase
+          .from('meters')
+          .upsert({
+            tenant_id: DEMO_TENANT,
+            meter_number: form.meter_number.trim(),
+            type: form.monitoring === 'Smart' ? 'Smart' : 'Traditional',
+            utility: form.product,
+          }, { onConflict: 'meter_number' })
+          .select('id')
+          .single()
+        if (mErr) throw mErr
+        meterId = meter.id
+      }
+
+      // 2. Insert energy_connection
+      const { data: conn, error: cErr } = await supabase
+        .from('energy_connections')
+        .insert({
+          tenant_id:       DEMO_TENANT,
+          site_id:         siteId || null,
+          site_name:       sites.find(s => s.id === siteId)?.name ?? form.city,
+          meter_id:        meterId,
+          ean_code:        form.ean_code || `EAN-${Date.now()}`,
+          connection_type: form.product,
+          capacity:        form.connection_value || '—',
+          status:          form.status,
+          latitude:        form.gps ? parseFloat(form.gps.split(',')[0]) : null,
+          longitude:       form.gps ? parseFloat(form.gps.split(',')[1]) : null,
+        })
+        .select('id')
+        .single()
+      if (cErr) throw cErr
+
+      // 3. Return to caller as FullConnection (for immediate UI update)
+      const { mix_override, ...rest } = form
+      onSave({ ...rest, id: conn.id, latitude: 25.2048, longitude: 55.2708 })
+    } catch (err: any) {
+      setSaveError(err.message ?? 'Failed to save')
+    } finally {
+      setSaving(false)
     }
-    onSave(newConn)
   }
 
   const PRODUCT_COLOR: Record<string, string> = {
@@ -178,6 +240,24 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto">
+
+          {/* Site picker — always visible at top */}
+          <div className="px-4 py-3 bg-accent/5 border-b border-border-subtle">
+            <div className="flex items-center gap-3">
+              <label className="text-[10px] text-white/40 w-[148px] min-w-[148px]">Link to site</label>
+              <select className={selectCls} value={siteId} onChange={e => setSiteId(e.target.value)}>
+                <option value="">— No site (add later) —</option>
+                {sites.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}{s.city ? ` · ${s.city}` : ''}</option>
+                ))}
+              </select>
+            </div>
+            {sites.length === 0 && (
+              <p className="text-[10px] text-amber-400/70 mt-1.5 ml-[160px]">
+                No sites yet — <a href="/sites" className="underline hover:text-amber-400">add a site first</a> or leave blank.
+              </p>
+            )}
+          </div>
 
           <Section title="Client">
             <Row label="Client">
@@ -459,15 +539,22 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-border-subtle bg-bg-primary/40 flex items-center justify-end gap-3">
-          <button type="button" onClick={onClose}
-            className="px-4 py-2 text-sm text-white/60 hover:text-white border border-border-default rounded-lg transition-colors">
-            Cancel
-          </button>
-          <button type="submit"
-            className="px-5 py-2 text-sm bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors flex items-center gap-2">
-            <Plus size={14} /> Save Connection
-          </button>
+        <div className="px-5 py-4 border-t border-border-subtle bg-bg-primary/40">
+          {saveError && (
+            <div className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2 mb-3">
+              {saveError}
+            </div>
+          )}
+          <div className="flex items-center justify-end gap-3">
+            <button type="button" onClick={onClose}
+              className="px-4 py-2 text-sm text-white/60 hover:text-white border border-border-default rounded-lg transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="px-5 py-2 text-sm bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors flex items-center gap-2 disabled:opacity-50">
+              {saving ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : <><Plus size={14} /> Save Connection</>}
+            </button>
+          </div>
         </div>
       </form>
     </div>
