@@ -24,6 +24,8 @@ import Emissions from '@/pages/Emissions'
 import CO2Forecast from '@/pages/CO2Forecast'
 import Budget from '@/pages/Budget'
 import Financials from '@/pages/Financials'
+import Alerts from '@/pages/Alerts'
+import Signup from '@/pages/Signup'
 import './index.css'
 
 const queryClient = new QueryClient()
@@ -54,12 +56,13 @@ const router = createBrowserRouter([
           { path: '/reports',         element: <Reports /> },
           { path: '/invoices',        element: <Invoices /> },
           { path: '/settings',        element: <Settings /> },
+          { path: '/alerts',          element: <Alerts /> },
           { path: '*',                element: <Navigate to="/" replace /> },
         ],
       },
     ],
   },
-  { path: '/signup', element: <Navigate to="/login" replace /> },
+  { path: '/signup', element: <Signup /> },
   { path: '*',       element: <Navigate to="/login" replace /> },
 ])
 

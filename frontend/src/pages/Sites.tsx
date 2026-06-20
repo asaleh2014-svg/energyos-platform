@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
 import { useAuth, useTenantId } from '@/lib/auth'
+import { isDemoMode } from '@/lib/demo'
 import { supabase } from '@/lib/supabase'
 import { MARKET_CONFIGS, type Market } from '@/types'
 import { CO2_FACTORS, type ElecSource, MONTHS } from '@/lib/mockData'
@@ -859,6 +860,7 @@ export default function Sites() {
   const { siteMixes, setCityMarket, getCityMarket, applyMarketToCountry } = useAppStore()
   const { profile } = useAuth()
   const tenantId = useTenantId()
+  const hasAccess = !!profile || isDemoMode()
   const navigate = useNavigate()
   const [sites, setSites]               = useState<DBSite[]>([])
   const [loading, setLoading]           = useState(true)
@@ -944,7 +946,7 @@ export default function Sites() {
         </div>
 
         {/* No tenant account — needs signup */}
-        {!profile && !loading && (
+        {!hasAccess && !loading && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <AlertCircle size={36} className="text-warning mb-4" />
             <div className="text-white/60 text-sm font-medium mb-1">No company account linked</div>
@@ -958,14 +960,14 @@ export default function Sites() {
         )}
 
         {/* Loading */}
-        {profile && loading && (
+        {hasAccess && loading && (
           <div className="flex items-center justify-center py-20 text-white/30 gap-2">
             <Loader2 size={16} className="animate-spin" /> Loading sites…
           </div>
         )}
 
         {/* Empty state */}
-        {profile && !loading && sites.length === 0 && (
+        {hasAccess && !loading && sites.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <Building2 size={36} className="text-white/10 mb-4" />
             <div className="text-white/40 text-sm font-medium mb-1">No sites yet</div>
@@ -977,12 +979,12 @@ export default function Sites() {
         )}
 
         {/* No search results */}
-        {profile && !loading && sites.length > 0 && filtered.length === 0 && (
+        {hasAccess && !loading && sites.length > 0 && filtered.length === 0 && (
           <div className="text-center py-16 text-white/30 text-sm">No sites match "{search}"</div>
         )}
 
         {/* Country → City → Sites */}
-        {profile && !loading && countries.map(country => {
+        {hasAccess && !loading && countries.map(country => {
           const countrySites = filtered.filter(s => (s.cities?.countries?.name ?? 'Unknown') === country)
           const countryCities = Array.from(new Set(countrySites.map(s => s.cities?.name ?? 'Unknown')))
           const countryCode = countrySites[0]?.cities?.countries?.code ?? ''

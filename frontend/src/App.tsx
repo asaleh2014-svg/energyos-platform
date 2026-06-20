@@ -50,6 +50,9 @@ const router = createBrowserRouter([
   },
 ])
 
+// Expose router for dev/test navigation
+;(window as any).__router = router
+
 export default function App() {
   return (
     <AuthProvider>
