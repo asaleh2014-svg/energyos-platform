@@ -5,11 +5,16 @@
 -- ============================================================
 
 -- ─── Ensure columns exist (safe if already present) ──────────────────────────
-ALTER TABLE energy_connections  ADD COLUMN IF NOT EXISTS tenant_id     UUID REFERENCES tenants(id);
-ALTER TABLE energy_connections  ADD COLUMN IF NOT EXISTS site_name     TEXT;
-ALTER TABLE invoices            ADD COLUMN IF NOT EXISTS tenant_id     UUID REFERENCES tenants(id);
-ALTER TABLE consumption_records ADD COLUMN IF NOT EXISTS connection_id  UUID REFERENCES energy_connections(id);
-ALTER TABLE consumption_records ADD COLUMN IF NOT EXISTS tenant_id      UUID REFERENCES tenants(id);
+ALTER TABLE energy_connections  ADD COLUMN IF NOT EXISTS tenant_id        UUID REFERENCES tenants(id);
+ALTER TABLE energy_connections  ADD COLUMN IF NOT EXISTS site_name        TEXT;
+ALTER TABLE energy_connections  ADD COLUMN IF NOT EXISTS ean_code         TEXT;
+ALTER TABLE energy_connections  ADD COLUMN IF NOT EXISTS connection_type  TEXT;
+ALTER TABLE energy_connections  ADD COLUMN IF NOT EXISTS capacity         TEXT;
+ALTER TABLE energy_connections  ADD COLUMN IF NOT EXISTS status           TEXT DEFAULT 'Active';
+ALTER TABLE energy_connections  ADD COLUMN IF NOT EXISTS meter_id         UUID;
+ALTER TABLE invoices            ADD COLUMN IF NOT EXISTS tenant_id        UUID REFERENCES tenants(id);
+ALTER TABLE consumption_records ADD COLUMN IF NOT EXISTS connection_id    UUID REFERENCES energy_connections(id);
+ALTER TABLE consumption_records ADD COLUMN IF NOT EXISTS tenant_id        UUID REFERENCES tenants(id);
 
 -- ─── Energy connections (2 per site) ─────────────────────────────────────────
 INSERT INTO energy_connections (id, tenant_id, site_id, site_name, ean_code, connection_type, capacity, status, meter_id)
