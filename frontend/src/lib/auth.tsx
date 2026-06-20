@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { type Session, type User } from '@supabase/supabase-js'
 import { supabase } from './supabase'
+import { isDemoMode, DEMO_TENANT as DEMO_TENANT_ID } from './demo'
 
 interface TenantProfile {
   id: string
@@ -70,10 +71,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export const useAuth = () => useContext(AuthContext)
 
-const DEMO_TENANT = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
-
-/** Returns the tenant ID of the logged-in user, falling back to the demo tenant. */
+/** Returns the tenant ID of the logged-in user, or the demo tenant in demo/fallback mode. */
 export const useTenantId = () => {
   const { profile } = useContext(AuthContext)
-  return profile?.id ?? DEMO_TENANT
+  return profile?.id ?? DEMO_TENANT_ID
 }

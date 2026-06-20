@@ -1,14 +1,16 @@
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
+import { isDemoMode } from '@/lib/demo'
 
 export function AuthGuard() {
   const { session, loading } = useAuth()
 
-  // Password reset links land on the root with #type=recovery in the hash.
-  // Send them to /login so the recovery form can handle the tokens.
   if (window.location.hash.includes('type=recovery')) {
     return <Navigate to={`/login${window.location.hash}`} replace />
   }
+
+  // Demo mode bypasses auth entirely
+  if (isDemoMode()) return <Outlet />
 
   if (loading) {
     return (

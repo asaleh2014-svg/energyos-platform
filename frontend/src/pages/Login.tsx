@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { Zap } from 'lucide-react'
+import { enterDemo } from '@/lib/demo'
 
 function ResetPasswordForm() {
   const navigate = useNavigate()
@@ -122,6 +123,22 @@ export default function Login() {
                   {loading ? 'Signing in…' : 'Sign in'}
                 </button>
               </form>
+
+              <div className="relative my-5">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-border-subtle" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-bg-card px-3 text-[11px] text-white/25">or</span>
+                </div>
+              </div>
+
+              <button
+                onClick={enterDemo}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-accent/30 bg-accent/5 text-accent hover:bg-accent/10 transition-all text-sm font-medium">
+                <Zap size={14} />
+                Try Live Demo — no sign-up needed
+              </button>
             </>
           )}
         </div>
