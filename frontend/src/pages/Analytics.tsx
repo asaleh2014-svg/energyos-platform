@@ -2,11 +2,15 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS } from '@/types'
-import { Zap, Flame, Upload, Download, CheckCircle, AlertTriangle, X, Loader2 } from 'lucide-react'
+import {
+  Zap, Flame, Upload, Download, CheckCircle, AlertTriangle, X, Loader2,
+  TrendingUp, TrendingDown, Minus, BarChart3, Activity,
+} from 'lucide-react'
 import { ChartCard } from '@/components/ChartCard'
 import { UnitSelect } from '@/components/UnitSelect'
+import { PeriodSelector, buildPeriod, DEFAULT_PERIOD, type Period } from '@/components/PeriodSelector'
 import {
-  ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip,
+  ComposedChart, Bar, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
 import clsx from 'clsx'
@@ -14,26 +18,17 @@ import { supabase } from '@/lib/supabase'
 import { useTenantId } from '@/lib/auth'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type Granularity = 'month' | 'year'
 type PageTab = 'charts' | 'import'
 
-const GRAN: { id: Granularity; label: string }[] = [
-  { id:'month', label:'Monthly' },
-  { id:'year',  label:'Yearly'  },
-]
+interface DataPoint { label: string; electricity: number; gas: number; cost: number }
 
-const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const TT = { background: '#0d1a2e', border: '1px solid #1e3a5f', borderRadius: 8, fontSize: 11 }
 
 // ─── Real consumption hook ────────────────────────────────────────────────────
-interface MonthlyPoint { label: string; electricity: number; gas: number; cost: number }
-interface YearlyPoint  { label: string; electricity: number; gas: number; cost: number }
-
 function useRealConsumption(tenantId: string) {
-  const [monthly, setMonthly]   = useState<MonthlyPoint[]>([])
-  const [yearly,  setYearly]    = useState<YearlyPoint[]>([])
-  const [loading, setLoading]   = useState(true)
-  const [version, setVersion]   = useState(0)
-
+  const [rows,    setRows]    = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [version, setVersion] = useState(0)
   const refresh = useCallback(() => setVersion(v => v + 1), [])
 
   useEffect(() => {
@@ -43,84 +38,135 @@ function useRealConsumption(tenantId: string) {
       .select('period_start, consumption, unit, cost')
       .eq('tenant_id', tenantId)
       .order('period_start')
-      .then(({ data: rows }) => {
-        if (!rows || rows.length === 0) { setLoading(false); return }
-
-        // Monthly buckets
-        const mBuckets: Record<string, { electricity: number; gas: number; cost: number }> = {}
-        const yBuckets: Record<string, { electricity: number; gas: number; cost: number }> = {}
-        for (const r of rows) {
-          const mKey = r.period_start.slice(0, 7)
-          const yKey = r.period_start.slice(0, 4)
-          if (!mBuckets[mKey]) mBuckets[mKey] = { electricity: 0, gas: 0, cost: 0 }
-          if (!yBuckets[yKey]) yBuckets[yKey] = { electricity: 0, gas: 0, cost: 0 }
-          if (r.unit === 'kWh') {
-            mBuckets[mKey].electricity += Number(r.consumption)
-            yBuckets[yKey].electricity += Number(r.consumption)
-          } else {
-            mBuckets[mKey].gas += Number(r.consumption)
-            yBuckets[yKey].gas += Number(r.consumption)
-          }
-          mBuckets[mKey].cost += Number(r.cost ?? 0)
-          yBuckets[yKey].cost += Number(r.cost ?? 0)
-        }
-
-        const mPoints = Object.entries(mBuckets)
-          .sort(([a],[b]) => a.localeCompare(b))
-          .map(([key, v]) => ({
-            label: new Date(key + '-01').toLocaleString('default', { month:'short', year:'2-digit' }),
-            electricity: Math.round(v.electricity),
-            gas:  Math.round(v.gas),
-            cost: Math.round(v.cost),
-          }))
-
-        const yPoints = Object.entries(yBuckets)
-          .sort(([a],[b]) => a.localeCompare(b))
-          .map(([key, v]) => ({
-            label: key,
-            electricity: Math.round(v.electricity),
-            gas:  Math.round(v.gas),
-            cost: Math.round(v.cost),
-          }))
-
-        setMonthly(mPoints)
-        setYearly(yPoints)
-        setLoading(false)
-      })
+      .then(({ data }) => { setRows(data ?? []); setLoading(false) })
   }, [tenantId, version])
 
-  return { monthly, yearly, loading, refresh }
+  return { rows, loading, refresh }
 }
 
-const TT = { background:'#0d2b35', border:'1px solid #1a5568', borderRadius:8, fontSize:11 }
+type Granularity = 'monthly' | 'quarterly' | 'yearly'
+
+function granForPeriod(p: Period): Granularity {
+  if (p.granularity === 'year' || p.granularity === 'quarter') return p.granularity === 'year' ? 'yearly' : 'quarterly'
+  const days = (p.to.getTime() - p.from.getTime()) / 86400000
+  if (days > 365) return 'quarterly'
+  if (days > 62)  return 'monthly'
+  return 'monthly'
+}
+
+function filterAndBucket(rows: any[], period: Period): DataPoint[] {
+  const from = period.from.toISOString().slice(0, 10)
+  const to   = period.to.toISOString().slice(0, 10)
+  const gran = granForPeriod(period)
+
+  const filtered = rows.filter(r => r.period_start >= from && r.period_start <= to)
+
+  const map: Record<string, { electricity: number; gas: number; cost: number }> = {}
+  for (const r of filtered) {
+    const d = r.period_start as string
+    let key: string
+    if (gran === 'yearly')    key = d.slice(0, 4)
+    else if (gran === 'quarterly') { const m = parseInt(d.slice(5, 7)); key = `${d.slice(0, 4)}-Q${Math.ceil(m / 3)}` }
+    else key = d.slice(0, 7)
+    if (!map[key]) map[key] = { electricity: 0, gas: 0, cost: 0 }
+    if (r.unit === 'kWh') map[key].electricity += Number(r.consumption)
+    else                  map[key].gas          += Number(r.consumption)
+    map[key].cost += Number(r.cost ?? 0)
+  }
+
+  return Object.entries(map)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, v]) => ({
+      label: gran === 'monthly'
+        ? (() => { const d = new Date(key + '-01'); return `${d.toLocaleString('default', { month: 'short' })} '${String(d.getFullYear()).slice(2)}` })()
+        : key,
+      electricity: Math.round(v.electricity),
+      gas:  Math.round(v.gas),
+      cost: Math.round(v.cost),
+    }))
+}
+
+// ─── KPI helpers ─────────────────────────────────────────────────────────────
+function KpiCard({
+  label, value, sub, trend, color = 'default',
+}: {
+  label: string; value: string; sub?: string
+  trend?: { pct: number; dir: 'up' | 'down' | 'flat'; good?: 'up' | 'down' }
+  color?: 'default' | 'blue' | 'amber' | 'green' | 'red'
+}) {
+  const trendColor = !trend ? '' :
+    trend.dir === 'flat' ? 'text-white/40' :
+    ((trend.dir === 'up') === (trend.good === 'up')) ? 'text-emerald-400' : 'text-red-400'
+  const TIcon = !trend ? null : trend.dir === 'up' ? TrendingUp : trend.dir === 'down' ? TrendingDown : Minus
+  const borderColor = { default: '', blue: 'border-l-2 border-l-blue-500/40', amber: 'border-l-2 border-l-amber-500/40', green: 'border-l-2 border-l-emerald-500/40', red: 'border-l-2 border-l-red-500/40' }[color]
+  return (
+    <div className={clsx('card', borderColor)}>
+      <div className="label mb-1 text-[10px] uppercase tracking-wider">{label}</div>
+      <div className="text-xl font-semibold text-white leading-tight">{value}</div>
+      <div className="flex items-center gap-2 mt-1">
+        {sub && <span className="text-xs text-white/40">{sub}</span>}
+        {trend && TIcon && (
+          <span className={clsx('flex items-center gap-0.5 text-xs font-medium', trendColor)}>
+            <TIcon size={10} /> {Math.abs(trend.pct).toFixed(1)}%
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // ─── Portfolio view ────────────────────────────────────────────────────────────
 function PortfolioView({
-  gran, showElec, showGas, setShowElec, setShowGas, monthly, yearly, loading,
+  period, rows, loading,
 }: {
-  gran: Granularity
-  showElec: boolean; showGas: boolean
-  setShowElec: (v: boolean) => void; setShowGas: (v: boolean) => void
-  monthly: MonthlyPoint[]; yearly: YearlyPoint[]; loading: boolean
+  period: Period; rows: any[]; loading: boolean
 }) {
   const [energyUnit, setEnergyUnit] = useState<'kWh' | 'MWh'>('kWh')
+  const [showElec, setShowElec] = useState(true)
+  const [showGas,  setShowGas]  = useState(true)
 
-  const rawData = gran === 'year' ? yearly : monthly
+  const data = filterAndBucket(rows, period)
 
-  const chartData = rawData.map(p => ({
-    label: p.label,
-    electricity: showElec ? (energyUnit === 'MWh' ? Math.round(p.electricity / 10) / 100 : p.electricity) : undefined,
-    gas: showGas ? p.gas : undefined,
-  }))
+  // For KPIs use all rows (full portfolio history)
+  const allFrom = new Date('2000-01-01'); const allTo = new Date('2099-12-31')
+  const monthly = filterAndBucket(rows, { ...period, preset: 'last_12m', from: allFrom, to: allTo, granularity: 'month', label: '' })
 
-  const elecArr = rawData.map(p => energyUnit === 'MWh' ? p.electricity / 1000 : p.electricity)
-  const gasArr  = rawData.map(p => p.gas)
+  const sumElec = data.reduce((a, p) => a + p.electricity, 0)
+  const sumGas  = data.reduce((a, p) => a + p.gas, 0)
+  const sumCost = data.reduce((a, p) => a + p.cost, 0)
 
-  const sumElec = elecArr.reduce((a,b)=>a+b,0)
-  const sumGas  = gasArr.reduce((a,b)=>a+b,0)
-  const avgElec = elecArr.length ? Math.round(sumElec / elecArr.length) : 0
-  const avgGas  = gasArr.length  ? Math.round(sumGas  / gasArr.length)  : 0
+  // YoY: compare first half vs second half of filtered period
+  const yoyPct = (() => {
+    if (data.length < 2) return null
+    const half = Math.floor(data.length / 2)
+    const recent = data.slice(-half).reduce((a, p) => a + p.electricity, 0)
+    const prior  = data.slice(0, half).reduce((a, p) => a + p.electricity, 0)
+    if (prior === 0) return null
+    return ((recent - prior) / prior) * 100
+  })()
+
+  const avgElec   = data.length ? sumElec / data.length : 0
+  const peakElec  = Math.max(...data.map(p => p.electricity), 0)
+  const peakPoint = data.find(p => p.electricity === peakElec)
+  const loadFactor = peakElec > 0 ? avgElec / peakElec : 0
+  const effectiveRate = sumElec > 0 ? sumCost / sumElec : 0
+  const gasKwh   = sumGas * 10.55
+  const totalKwh = sumElec + gasKwh
+  const gasShare = totalKwh > 0 ? (gasKwh / totalKwh) * 100 : 0
+  const eui      = totalKwh > 0 ? (totalKwh / 97000).toFixed(1) : '—'
+  const co2      = (sumElec * 0.45 + sumGas * 2.04) / 1000
+  const co2Intensity = totalKwh > 0 ? ((co2 * 1000) / totalKwh).toFixed(2) : '—'
   const unit = energyUnit
+
+  const gran = granForPeriod(period)
+  const barSize = gran === 'yearly' ? 60 : gran === 'quarterly' ? 40 : 20
+
+  const chartData = data.map(p => ({
+    label: p.label,
+    electricity: showElec ? (unit === 'MWh' ? Math.round(p.electricity / 10) / 100 : p.electricity) : undefined,
+    gas: showGas ? p.gas : undefined,
+    cost: p.cost,
+  }))
 
   return (
     <>
@@ -129,144 +175,149 @@ function PortfolioView({
           <Loader2 size={12} className="animate-spin" /> Loading consumption data…
         </div>
       )}
-      {!loading && rawData.length === 0 && (
+      {!loading && rows.length === 0 && (
         <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs">
-          <AlertTriangle size={12} /> No consumption data yet — import CSV records to see charts.
+          <AlertTriangle size={12} /> No consumption data — import CSV records to see charts.
         </div>
       )}
-      {!loading && rawData.length > 0 && (
+      {!loading && rows.length > 0 && (
         <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
           <CheckCircle size={12} />
-          Showing {rawData.length} {gran === 'year' ? 'year' : 'month'}(s) of real imported data
+          {data.length} {gran} period{data.length !== 1 ? 's' : ''} · {period.label}
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-4 mb-5">
-        <div className="card">
-          <div className="label mb-1">Total Electricity ({unit})</div>
-          <div className="text-xl font-semibold text-white">{sumElec.toLocaleString()}</div>
-          <div className="text-xs text-white/40 mt-1">avg {avgElec.toLocaleString()} · peak {Math.max(...elecArr, 0).toLocaleString()}</div>
-        </div>
-        <div className="card">
-          <div className="label mb-1">Total Gas (m³)</div>
-          <div className="text-xl font-semibold text-white">{sumGas.toLocaleString()}</div>
-          <div className="text-xs text-white/40 mt-1">avg {avgGas.toLocaleString()} · peak {Math.max(...gasArr, 0).toLocaleString()}</div>
-        </div>
-        <div className="card">
-          <div className="label mb-1">Elec / Gas Ratio</div>
-          <div className="text-xl font-semibold text-white">
-            {sumGas > 0 ? (sumElec / sumGas).toFixed(0) : '—'} kWh/m³
-          </div>
-          <div className="text-xs text-white/40 mt-1">across selected period</div>
-        </div>
+      {/* ── KPI Row 1: Volume & Cost ──────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <KpiCard
+          label="Total Electricity"
+          value={unit === 'MWh' ? `${(sumElec / 1000).toFixed(0)} MWh` : `${Math.round(sumElec).toLocaleString()} kWh`}
+          sub={`avg ${Math.round(avgElec).toLocaleString()} ${unit}/mo`}
+          color="blue"
+        />
+        <KpiCard
+          label="Total Gas"
+          value={`${Math.round(sumGas).toLocaleString()} m³`}
+          sub={`≈ ${Math.round(gasKwh).toLocaleString()} kWh equiv.`}
+          color="amber"
+        />
+        <KpiCard
+          label="Total Cost"
+          value={`AED ${Math.round(sumCost).toLocaleString()}`}
+          sub={`${effectiveRate.toFixed(3)} AED / kWh eff.`}
+        />
+        {yoyPct !== null ? (
+          <KpiCard
+            label="Trend (H1 vs H2)"
+            value={`${yoyPct > 0 ? '+' : ''}${yoyPct.toFixed(1)}%`}
+            sub="electricity half-period"
+            trend={{ pct: Math.abs(yoyPct), dir: yoyPct > 1 ? 'up' : yoyPct < -1 ? 'down' : 'flat', good: 'down' }}
+          />
+        ) : (
+          <KpiCard label="Trend" value="—" sub="need ≥2 periods" />
+        )}
       </div>
 
+      {/* ── KPI Row 2: Intensity & Performance ──────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <KpiCard
+          label="EUI (Energy Use Intensity)"
+          value={`${eui} kWh/m²`}
+          sub="vs 97,000 m² total area"
+          color={Number(eui) < 150 ? 'green' : Number(eui) < 300 ? 'default' : 'red'}
+        />
+        <KpiCard
+          label="Carbon Intensity"
+          value={`${co2Intensity} kgCO₂/kWh`}
+          sub={`${(co2).toFixed(0)} t CO₂ total`}
+          color="default"
+        />
+        <KpiCard
+          label="Load Factor"
+          value={`${(loadFactor * 100).toFixed(0)}%`}
+          sub={`peak ${Math.round(peakElec).toLocaleString()} kWh · ${peakPoint?.label ?? '—'}`}
+          color={loadFactor > 0.7 ? 'green' : loadFactor > 0.5 ? 'default' : 'red'}
+        />
+        <KpiCard
+          label="Gas / Heat Share"
+          value={`${gasShare.toFixed(1)}%`}
+          sub="of total energy portfolio"
+          color="amber"
+        />
+      </div>
+
+      {/* ── Chart controls ────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <UnitSelect value={energyUnit} onChange={setEnergyUnit} />
+        {[
+          { active: showElec, set: setShowElec, color: 'blue',  icon: <Zap size={11}/>,   label: 'Electricity' },
+          { active: showGas,  set: setShowGas,  color: 'amber', icon: <Flame size={11}/>, label: 'Gas' },
+        ].map(({ active, set, color, icon, label }) => (
+          <button key={label} onClick={() => set(!active)}
+            className={clsx(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all',
+              active && color === 'blue'  && 'bg-blue-500/15 border-blue-500/40 text-blue-300',
+              active && color === 'amber' && 'bg-amber-500/15 border-amber-500/40 text-amber-300',
+              !active && 'border-border-subtle text-white/30',
+            )}>
+            {icon} {label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Chart ────────────────────────────────────────────────────────── */}
       <ChartCard
-        title={`Fleet Total — ${GRAN.find(g=>g.id===gran)!.label} View`}
-        subtitle="Real imported data"
-        action={
-          <div className="flex items-center gap-2">
-            <UnitSelect value={energyUnit} onChange={setEnergyUnit} />
-            {[
-              { active: showElec, set: setShowElec, color:'blue',  Icon: Zap,   label:'Electricity' },
-              { active: showGas,  set: setShowGas,  color:'amber', Icon: Flame, label:'Gas' },
-            ].map(({ active, set, color, Icon, label }) => (
-              <button key={label} onClick={() => set(!active)}
-                className={clsx(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all',
-                  active && color === 'blue'  && 'bg-blue-500/15 border-blue-500/40 text-blue-300',
-                  active && color === 'amber' && 'bg-amber-500/15 border-amber-500/40 text-amber-300',
-                  !active && 'border-border-subtle text-white/30',
-                )}>
-                <Icon size={11} /> {label}
-              </button>
-            ))}
-          </div>
-        }
+        title={`${gran.charAt(0).toUpperCase() + gran.slice(1)} Consumption`}
+        subtitle={`${chartData.length} periods · ${period.label}`}
         table={
           <table className="w-full">
             <thead><tr>
               <th className="tbl-th">Period</th>
               {showElec && <th className="tbl-th">Electricity ({unit})</th>}
               {showGas  && <th className="tbl-th">Gas (m³)</th>}
+              <th className="tbl-th">Cost</th>
             </tr></thead>
             <tbody>
               {chartData.map(row => (
                 <tr key={row.label} className="tbl-row">
                   <td className="tbl-td text-white/70">{row.label}</td>
-                  {showElec && <td className="tbl-td text-blue-300">{(row.electricity as number ?? 0).toLocaleString()}</td>}
-                  {showGas  && <td className="tbl-td text-amber-300">{(row.gas as number ?? 0).toLocaleString()}</td>}
+                  {showElec && <td className="tbl-td text-blue-300">{(row.electricity ?? 0).toLocaleString()}</td>}
+                  {showGas  && <td className="tbl-td text-amber-300">{(row.gas ?? 0).toLocaleString()}</td>}
+                  <td className="tbl-td text-white/60">{row.cost.toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         }
       >
-        <ResponsiveContainer width="100%" height={320}>
-          <ComposedChart data={chartData} margin={{ top:5, right:20, left:-5, bottom:5 }}>
+        <ResponsiveContainer width="100%" height={300}>
+          <ComposedChart data={chartData} margin={{ top: 5, right: 24, left: -5, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-            <XAxis dataKey="label" tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} />
-            <YAxis yAxisId="elec" tick={{ fill:'#3b82f6', fontSize:10 }} axisLine={false} tickLine={false}
-              tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}K` : `${v}`} />
-            <YAxis yAxisId="gas" orientation="right" tick={{ fill:'#f59e0b', fontSize:10 }}
-              axisLine={false} tickLine={false} />
+            <XAxis dataKey="label" tick={{ fill: '#5a6385', fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis yAxisId="elec" tick={{ fill: '#3b82f6', fontSize: 10 }} axisLine={false} tickLine={false}
+              tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : `${v}`} />
+            <YAxis yAxisId="gas" orientation="right" tick={{ fill: '#f59e0b', fontSize: 10 }} axisLine={false} tickLine={false}
+              tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : `${v}`} />
             <Tooltip contentStyle={TT}
-              labelStyle={{ color:'#e8eaf2', fontWeight:600, marginBottom:4 }}
+              labelStyle={{ color: '#e8eaf2', fontWeight: 600, marginBottom: 4 }}
               formatter={(value: number, name: string) => [
                 `${value.toLocaleString()} ${name === 'electricity' ? unit : 'm³'}`,
                 name === 'electricity' ? 'Electricity' : 'Gas',
               ]} />
-            <Legend wrapperStyle={{ fontSize:11 }} formatter={v => v === 'electricity' ? 'Electricity' : 'Gas'} />
+            <Legend wrapperStyle={{ fontSize: 11 }} formatter={v => v === 'electricity' ? 'Electricity' : 'Gas'} />
             {showElec && (
               <Bar yAxisId="elec" dataKey="electricity" name="electricity" fill="#3b82f6"
-                opacity={0.8} radius={[3,3,0,0]} maxBarSize={gran === 'year' ? 60 : 24} />
+                opacity={0.85} radius={[3, 3, 0, 0]} maxBarSize={barSize} />
             )}
             {showGas && (
               <Line yAxisId="gas" type="monotone" dataKey="gas" name="gas"
                 stroke="#f59e0b" strokeWidth={2}
-                dot={chartData.length <= 15 ? { r:3, fill:'#f59e0b' } : false}
-                activeDot={{ r:4 }} />
+                dot={chartData.length <= 20 ? { r: 3, fill: '#f59e0b' } : false}
+                activeDot={{ r: 4 }} />
             )}
           </ComposedChart>
         </ResponsiveContainer>
       </ChartCard>
-
-      <div className="grid grid-cols-2 gap-4 mt-4">
-        {[
-          { key:'electricity', title:'Electricity Only', color:'#3b82f6', u: unit },
-          { key:'gas',         title:'Gas Only',         color:'#f59e0b', u:'m³'  },
-        ].map(({ key, title, color, u }) => (
-          <ChartCard
-            key={key}
-            title={title}
-            table={
-              <table className="w-full">
-                <thead><tr><th className="tbl-th">Period</th><th className="tbl-th">{u}</th></tr></thead>
-                <tbody>
-                  {chartData.map(row => (
-                    <tr key={row.label} className="tbl-row">
-                      <td className="tbl-td text-white/70">{row.label}</td>
-                      <td className="tbl-td" style={{ color }}>{(row[key as keyof typeof row] as number ?? 0).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            }
-          >
-            <ResponsiveContainer width="100%" height={190}>
-              <BarChart data={chartData} margin={{ top:0, right:0, left:-15, bottom:0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-                <XAxis dataKey="label" tick={{ fill:'#5a6385', fontSize:9 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill:'#5a6385', fontSize:9 }} axisLine={false} tickLine={false}
-                  tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}K` : `${v}`} />
-                <Tooltip contentStyle={TT}
-                  formatter={(v: number) => [`${v.toLocaleString()} ${u}`, title]} />
-                <Bar dataKey={key} fill={color} opacity={0.85} radius={[3,3,0,0]} maxBarSize={28} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-        ))}
-      </div>
     </>
   )
 }
@@ -443,8 +494,7 @@ function ImportView({ tenantId, onImported }: { tenantId: string; onImported: ()
                       <td className="tbl-td">
                         {r.error
                           ? <span className="flex items-center gap-1 text-red-400"><AlertTriangle size={10}/>{r.error}</span>
-                          : <span className="flex items-center gap-1 text-emerald-400"><CheckCircle size={10}/>Ready</span>
-                        }
+                          : <span className="flex items-center gap-1 text-emerald-400"><CheckCircle size={10}/>Ready</span>}
                       </td>
                     </tr>
                   ))}
@@ -473,7 +523,7 @@ function ImportView({ tenantId, onImported }: { tenantId: string; onImported: ()
           <CheckCircle size={40} className="text-emerald-400" />
           <div className="text-center">
             <p className="text-white font-semibold">{result.ok} record{result.ok !== 1 ? 's' : ''} imported</p>
-            {result.err > 0 && <p className="text-xs text-red-400 mt-1">{result.err} row{result.err !== 1 ? 's' : ''} skipped due to errors</p>}
+            {result.err > 0 && <p className="text-xs text-red-400 mt-1">{result.err} row{result.err !== 1 ? 's' : ''} skipped</p>}
             <p className="text-xs text-white/40 mt-2">Charts will now show your real data</p>
           </div>
           <button onClick={() => { setRows(null); setResult(null) }}
@@ -490,15 +540,17 @@ function ImportView({ tenantId, onImported }: { tenantId: string; onImported: ()
 export default function Analytics() {
   const { market } = useAppStore()
   const tenantId = useTenantId()
-  const _cfg = MARKET_CONFIGS[market]
-  void _cfg
+  const _cfg = MARKET_CONFIGS[market]; void _cfg
 
-  const [tab,      setTab]      = useState<PageTab>('charts')
-  const [gran,     setGran]     = useState<Granularity>('month')
-  const [showElec, setShowElec] = useState(true)
-  const [showGas,  setShowGas]  = useState(true)
+  const [tab,    setTab]    = useState<PageTab>('charts')
+  // Default: span 2024-2025 to show all available demo data
+  const [period, setPeriod] = useState<Period>({
+    preset: 'custom', label: '2024 – 2025',
+    from: new Date('2024-01-01'), to: new Date('2025-12-31'),
+    granularity: 'month',
+  })
 
-  const { monthly, yearly, loading, refresh } = useRealConsumption(tenantId)
+  const { rows, loading, refresh } = useRealConsumption(tenantId)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -506,46 +558,30 @@ export default function Analytics() {
       <div className="flex-1 overflow-y-auto p-6">
 
         {/* ── Tab bar ──────────────────────────────────────────────────────── */}
-        <div className="flex items-center gap-1 mb-6 bg-bg-secondary border border-border-subtle rounded-xl p-1 w-fit">
-          {([['charts', 'Charts'], ['import', 'Import CSV']] as const).map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={clsx(
-                'px-4 py-1.5 rounded-lg text-sm font-medium transition-all',
-                tab === id ? 'bg-accent text-white shadow' : 'text-white/40 hover:text-white/70'
-              )}>
-              {id === 'import' && <Upload size={11} className="inline mr-1.5 -mt-px" />}
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center gap-3 mb-6 flex-wrap">
+          <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-xl p-1">
+            {([['charts', <BarChart3 size={11}/>, 'Charts'], ['import', <Upload size={11}/>, 'Import CSV']] as const).map(([id, icon, label]) => (
+              <button key={id} onClick={() => setTab(id as PageTab)}
+                className={clsx(
+                  'flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-all',
+                  tab === id ? 'bg-accent text-white shadow' : 'text-white/40 hover:text-white/70'
+                )}>
+                {icon}{label}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'charts' && (
+            <PeriodSelector value={period} onChange={setPeriod} />
+          )}
+
+          {loading && <Loader2 size={13} className="animate-spin text-white/30" />}
         </div>
 
         {tab === 'import' ? (
           <ImportView tenantId={tenantId} onImported={() => { refresh(); setTab('charts') }} />
         ) : (
-          <>
-            {/* ── Controls row ─────────────────────────────────────────────── */}
-            <div className="flex items-center gap-4 mb-6 flex-wrap">
-              <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-xl p-1">
-                {GRAN.map(g => (
-                  <button key={g.id} onClick={() => setGran(g.id)}
-                    className={clsx(
-                      'px-4 py-1.5 rounded-lg text-sm font-medium transition-all',
-                      gran === g.id ? 'bg-accent text-white shadow' : 'text-white/40 hover:text-white/70'
-                    )}>
-                    {g.label}
-                  </button>
-                ))}
-              </div>
-              {loading && <Loader2 size={13} className="animate-spin text-white/30 ml-auto" />}
-            </div>
-
-            <PortfolioView
-              gran={gran}
-              showElec={showElec} showGas={showGas}
-              setShowElec={setShowElec} setShowGas={setShowGas}
-              monthly={monthly} yearly={yearly} loading={loading}
-            />
-          </>
+          <PortfolioView period={period} rows={rows} loading={loading} />
         )}
 
       </div>
