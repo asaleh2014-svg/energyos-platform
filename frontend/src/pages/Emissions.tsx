@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { useTenantId } from '@/lib/auth'
 import { useNavigate } from 'react-router-dom'
-import { fetchConnections, fetchConsumption, co2Tonnes } from '@/lib/dbQueries'
+import { fetchConnections, fetchConsumption, fetchSites, co2Tonnes } from '@/lib/dbQueries'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Cell, Legend,
@@ -13,7 +13,7 @@ import { ChartCard } from '@/components/ChartCard'
 
 const TT = { background:'#111520', border:'1px solid #ffffff20', borderRadius:8, fontSize:12 }
 
-type ViewLevel = 'portfolio' | 'city' | 'site' | 'meter'
+type ViewLevel = 'portfolio' | 'country' | 'city' | 'site' | 'meter'
 
 interface MeterCO2 {
   id: string
@@ -21,6 +21,7 @@ interface MeterCO2 {
   site: string
   siteName: string
   city: string
+  country: string
   type: string
   tco2: number
   elecTco2: number
@@ -37,10 +38,20 @@ export default function Emissions() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const [conns, records] = await Promise.all([
+      const [conns, records, sites] = await Promise.all([
         fetchConnections(tenantId),
         fetchConsumption(tenantId),
+        fetchSites(tenantId),
       ])
+
+      // Build site → city/country lookup
+      const siteInfo: Record<string, { city: string; country: string }> = {}
+      for (const s of sites) {
+        const city    = s.cities?.name ?? 'Unknown'
+        const country = s.cities?.countries?.name ?? 'Unknown'
+        siteInfo[s.id]   = { city, country }
+        siteInfo[s.name] = { city, country }   // also index by name for fallback
+      }
 
       // Aggregate consumption per connection
       const connElec: Record<string, number> = {}
@@ -58,12 +69,14 @@ export default function Emissions() {
         const elecTco2 = (elec * 0.45) / 1000
         const gasTco2  = (gas  * 2.04) / 1000
         const tco2 = Math.round((elecTco2 + gasTco2) * 10) / 10
+        const info = siteInfo[c.site_id] ?? siteInfo[c.site_name] ?? { city: 'Unknown', country: 'Unknown' }
         return {
           id:       c.id,
           label:    c.ean_code ?? c.id,
           site:     c.site_name ?? 'Unknown',
           siteName: c.site_name ?? 'Unknown',
-          city:     'UAE',
+          city:     info.city,
+          country:  info.country,
           type:     c.connection_type ?? 'Electricity',
           tco2,
           elecTco2: Math.round(elecTco2 * 10) / 10,
@@ -86,6 +99,21 @@ export default function Emissions() {
   })
   const siteCO2 = Object.entries(siteMap).map(([site, d]) => ({
     label:       site.replace(' Zone','').replace(' Hub','').replace(' Tower',''),
+    electricity: Math.round(d.elec * 10) / 10,
+    gas:         Math.round(d.gas  * 10) / 10,
+    total:       Math.round((d.elec + d.gas) * 10) / 10,
+  })).sort((a, b) => b.total - a.total)
+
+  // Per-country aggregation
+  const countryMap: Record<string, { elec: number; gas: number }> = {}
+  meterCO2.forEach(m => {
+    const key = m.country || 'Unknown'
+    if (!countryMap[key]) countryMap[key] = { elec: 0, gas: 0 }
+    countryMap[key].elec += m.elecTco2
+    countryMap[key].gas  += m.gasTco2
+  })
+  const countryCO2 = Object.entries(countryMap).map(([country, d]) => ({
+    label:       country,
     electricity: Math.round(d.elec * 10) / 10,
     gas:         Math.round(d.gas  * 10) / 10,
     total:       Math.round((d.elec + d.gas) * 10) / 10,
@@ -196,7 +224,7 @@ export default function Emissions() {
 
         {/* ── View level tabs ───────────────────────────────────────────── */}
         <div className="flex items-center gap-1 mb-5 bg-bg-secondary border border-border-subtle rounded-xl p-1 w-fit">
-          {(['portfolio','city','site','meter'] as ViewLevel[]).map(v => (
+          {(['portfolio','country','city','site','meter'] as ViewLevel[]).map(v => (
             <button key={v} onClick={() => setView(v)}
               className={clsx('px-4 py-1.5 rounded-lg text-sm font-medium transition-all capitalize',
                 view === v ? 'bg-accent text-white shadow' : 'text-white/40 hover:text-white/70'
@@ -273,6 +301,41 @@ export default function Emissions() {
                 </ResponsiveContainer>
               </div>
             </div>
+          </ChartCard>
+        )}
+
+        {view === 'country' && (
+          <ChartCard
+            title="CO₂ by Country"
+            subtitle="Annual tonnes CO₂ aggregated per country"
+            table={
+              <table className="w-full">
+                <thead><tr>{['Country','Elec CO₂ (t)','Gas CO₂ (t)','Total CO₂ (t)','% Portfolio'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
+                <tbody>
+                  {countryCO2.map(c=>(
+                    <tr key={c.label} className="tbl-row">
+                      <td className="tbl-td text-white font-medium">{c.label}</td>
+                      <td className="tbl-td text-blue-300">{c.electricity.toFixed(1)}</td>
+                      <td className="tbl-td text-amber-300">{c.gas.toFixed(1)}</td>
+                      <td className="tbl-td text-white font-semibold">{c.total.toFixed(1)}</td>
+                      <td className="tbl-td text-white/60">{totalCO2>0?((c.total/totalCO2)*100).toFixed(1):0}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            }
+          >
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={countryCO2} margin={{top:5,right:10,left:-5,bottom:0}}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08"/>
+                <XAxis dataKey="label" tick={{fill:'#5a6385',fontSize:11}} axisLine={false} tickLine={false}/>
+                <YAxis tick={{fill:'#5a6385',fontSize:10}} axisLine={false} tickLine={false} unit=" t"/>
+                <Tooltip contentStyle={TT} formatter={(v:number,name:string)=>[`${(v as number).toFixed(1)} tCO₂`,name==='electricity'?'Electricity':'Gas']}/>
+                <Legend wrapperStyle={{fontSize:11}} formatter={v=>v==='electricity'?'Electricity':'Gas'}/>
+                <Bar dataKey="electricity" name="electricity" stackId="a" fill="#3b82f6" opacity={0.85} radius={[0,0,0,0]}/>
+                <Bar dataKey="gas"         name="gas"         stackId="a" fill="#f59e0b" opacity={0.85} radius={[3,3,0,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
           </ChartCard>
         )}
 
