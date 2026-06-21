@@ -15,7 +15,7 @@ import clsx from 'clsx'
 import { useTenantId } from '@/lib/auth'
 import {
   fetchSites, fetchConnections, fetchConsumption,
-  groupByMonth, sumConsumption, co2Tonnes,
+  groupByMonth, sumConsumption, co2Tonnes, monthsAgo,
 } from '@/lib/dbQueries'
 
 const TT = { background: '#111520', border: '1px solid #ffffff20', borderRadius: 8, fontSize: 12 }
@@ -60,14 +60,10 @@ export default function Dashboard() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const twelveMonthsAgo = new Date()
-      twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12)
-      const fromDate = twelveMonthsAgo.toISOString().slice(0, 10)
-
       const [s, c, rec] = await Promise.all([
         fetchSites(tenantId),
         fetchConnections(tenantId),
-        fetchConsumption(tenantId, fromDate),
+        fetchConsumption(tenantId),
       ])
 
       setSites(s)

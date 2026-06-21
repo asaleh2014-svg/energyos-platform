@@ -8,7 +8,7 @@ import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS } from '@/types'
 import { useTenantId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
-import { fetchConsumption, sumConsumption, groupByMonth } from '@/lib/dbQueries'
+import { fetchConsumption, sumConsumption, groupByMonth, monthsAgo } from '@/lib/dbQueries'
 import {
   ArrowLeft, Building2, Zap, Info, ChevronDown, ChevronUp, MapPin,
 } from 'lucide-react'
@@ -119,15 +119,10 @@ export default function SiteDetail() {
       // Fetch consumption via connection IDs
       if (conns.length > 0) {
         const connIds = conns.map((c: any) => c.id)
-        const twelveMonthsAgo = new Date()
-        twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12)
-        const fromDate = twelveMonthsAgo.toISOString().slice(0, 10)
-
         const { data: recData } = await supabase
           .from('consumption_records')
           .select('connection_id, period_start, period_end, consumption, unit, cost, currency')
           .in('connection_id', connIds)
-          .gte('period_start', fromDate)
           .order('period_start')
 
         const recs = recData ?? []

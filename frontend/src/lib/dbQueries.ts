@@ -48,6 +48,13 @@ export async function fetchConsumption(tenantId: string, fromDate?: string) {
   return (data ?? []) as any[]
 }
 
+// Returns YYYY-MM-01 for N months ago (inclusive of that month's records)
+export function monthsAgo(n: number): string {
+  const d = new Date()
+  d.setMonth(d.getMonth() - n + 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+}
+
 // ── Aggregation helpers ────────────────────────────────────────────────────────
 export function groupByMonth(records: any[]) {
   const map: Record<string, { elec: number; gas: number; cost: number; currency: string }> = {}

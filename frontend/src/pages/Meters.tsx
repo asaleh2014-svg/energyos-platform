@@ -8,6 +8,7 @@ import {
 import clsx from 'clsx'
 import { supabase } from '@/lib/supabase'
 import { useTenantId } from '@/lib/auth'
+import { monthsAgo } from '@/lib/dbQueries'
 
 const TT = { background: '#111520', border: '1px solid #ffffff20', borderRadius: 8, fontSize: 12 }
 
@@ -154,14 +155,11 @@ export default function Meters() {
   useEffect(() => {
     if (connections.length === 0) return
     const ids = connections.map(c => c.id)
-    const oneYearAgo = new Date()
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 2)
     supabase
       .from('consumption_records')
       .select('*')
       .eq('tenant_id', tenantId)
       .in('connection_id', ids)
-      .gte('period_start', oneYearAgo.toISOString().slice(0, 10))
       .then(({ data }) => setAllRecords((data ?? []) as ConsumptionRecord[]))
   }, [connections, tenantId])
 
