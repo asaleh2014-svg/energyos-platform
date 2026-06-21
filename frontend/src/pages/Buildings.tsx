@@ -4,8 +4,9 @@ import { Topbar } from '@/components/layout/Topbar'
 import {
   Hotel, MapPin, Zap, Flame, Leaf, Award, ChevronRight, ChevronDown,
   BarChart3, Users, Thermometer, Droplets, Wind, ArrowLeft,
-  Building2, Table, Link2, Activity,
+  Building2, Table, Link2, Activity, Plus,
 } from 'lucide-react'
+import AddConnectionPanel from '@/components/connections/AddConnectionPanel'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
@@ -378,6 +379,7 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
 
   const area   = building.area_m2 ?? 1
   const TT = { background: '#0d2b35', border: '1px solid #1a5568', borderRadius: 8, fontSize: 11 }
+  const [showAddConn, setShowAddConn] = useState(false)
 
   // Fetch connections for this site
   useEffect(() => {
@@ -523,7 +525,29 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
           </ResponsiveContainer>
         </div>
 
-        <BuildingConnectionsSection siteId={building.site_id} />
+        {/* Connections section with Add button */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Link2 size={14} className="text-accent" />
+              <span className="text-xs font-semibold text-white/60 uppercase tracking-widest">Connections & Meters</span>
+            </div>
+            <button onClick={() => setShowAddConn(true)}
+              className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover border border-accent/30 hover:border-accent/60 px-3 py-1.5 rounded-lg transition-colors">
+              <Plus size={12} /> Add Connection
+            </button>
+          </div>
+          <BuildingConnectionsSection siteId={building.site_id} />
+        </div>
+
+        {showAddConn && (
+          <AddConnectionPanel
+            defaultSiteId={building.site_id}
+            defaultBuildingName={building.name}
+            onClose={() => setShowAddConn(false)}
+            onSave={() => setShowAddConn(false)}
+          />
+        )}
 
         {showTable && (
           <div className="card p-0 overflow-hidden">

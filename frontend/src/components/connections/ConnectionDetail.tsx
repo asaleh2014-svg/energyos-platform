@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   X, ChevronDown, ChevronRight, Edit2, Maximize2, Printer,
   History, Zap, Flame, Droplets, Download, ExternalLink,
@@ -12,6 +12,8 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import type { FullConnection } from '@/lib/connectionsData'
+import { supabase } from '@/lib/supabase'
+import { useTenantId } from '@/lib/auth'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -373,18 +375,68 @@ interface Props {
 }
 
 export default function ConnectionDetail({ conn, onClose }: Props) {
+  const tenantId = useTenantId()
   const color = PRODUCT_COLOR[conn.product] ?? '#6b7280'
   const capacityLog = makeCapacityLog()
   const statusLog = makeStatusLog(conn)
   const [energyUnit, setEnergyUnit] = useState<'kWh' | 'MWh'>('kWh')
   const [showTable,  setShowTable]  = useState(false)
   const [period,     setPeriod]     = useState<Period>(DEFAULT_PERIOD)
+  const [dbRecords,  setDbRecords]  = useState<{ period_start: string; consumption: number }[] | null>(null)
 
   const isElec = conn.product === 'Electricity'
-  const baseUnit = isElec ? 'kWh' : conn.product === 'Gas' ? 'm³' : 'm³'
+  const baseUnit = isElec ? 'kWh' : 'm³'
   const unit = isElec ? energyUnit : baseUnit
 
-  const rawData = useMemo(() => makeConsumptionData(conn, period), [conn, period])
+  // Fetch real consumption records from DB
+  useEffect(() => {
+    if (!conn.id) return
+    supabase
+      .from('consumption_records')
+      .select('period_start, consumption')
+      .eq('tenant_id', tenantId)
+      .eq('connection_id', conn.id)
+      .order('period_start')
+      .then(({ data }) => setDbRecords(data ?? []))
+  }, [conn.id, tenantId])
+
+  // Build chart rows from real DB data, fall back to mock only if no records at all
+  const rawData = useMemo(() => {
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    const now = new Date()
+
+    if (dbRecords && dbRecords.length > 0) {
+      // Group real records by month key
+      const byMonth: Record<string, number> = {}
+      for (const r of dbRecords) {
+        const key = r.period_start.slice(0, 7) // YYYY-MM
+        byMonth[key] = (byMonth[key] ?? 0) + r.consumption
+      }
+      // Compute avg for forecast
+      const vals = Object.values(byMonth)
+      const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+
+      const rows: { label: string; peak: number|null; offpeak: number|null; actual: number|null; forecast: number|null }[] = []
+      const cur = new Date(period.from.getFullYear(), period.from.getMonth(), 1)
+      const end = new Date(period.to.getFullYear(), period.to.getMonth(), 1)
+      while (cur <= end) {
+        const key = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}`
+        const label = `${MONTHS[cur.getMonth()]}${cur.getFullYear() !== now.getFullYear() ? ` ${cur.getFullYear()}` : ''}`
+        const isFuture = cur > now
+        const actual = byMonth[key] ?? null
+        if (isFuture || actual === null) {
+          rows.push({ label, peak: null, offpeak: null, actual: null, forecast: Math.round(avg) })
+        } else {
+          const peak = Math.round(actual * 0.62)
+          rows.push({ label, peak, offpeak: actual - peak, actual, forecast: null })
+        }
+        cur.setMonth(cur.getMonth() + 1)
+      }
+      return rows
+    }
+    return makeConsumptionData(conn, period)
+  }, [dbRecords, conn, period])
+
   const chartData = rawData.map(row => {
     if (!isElec || energyUnit === 'kWh') return row
     const scale = (v: number | null) => v != null ? parseFloat((v / 1000).toFixed(3)) : null

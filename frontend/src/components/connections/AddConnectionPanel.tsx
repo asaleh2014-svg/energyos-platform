@@ -107,17 +107,20 @@ const EMPTY: FormData = {
 interface Props {
   onClose: () => void
   onSave: (conn: FullConnection) => void
+  defaultSiteId?: string
+  defaultBuildingName?: string
 }
 
-export default function AddConnectionPanel({ onClose, onSave }: Props) {
+export default function AddConnectionPanel({ onClose, onSave, defaultSiteId = '', defaultBuildingName = '' }: Props) {
   const tenantId = useTenantId()
-  const [form, setForm] = useState<FormData>(EMPTY)
+  const [form, setForm] = useState<FormData>({ ...EMPTY, building: defaultBuildingName })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [sites, setSites] = useState<{ id: string; name: string; city: string }[]>([])
-  const [siteId, setSiteId] = useState('')
+  const [siteId, setSiteId] = useState(defaultSiteId)
+  const [buildings, setBuildings] = useState<{ id: string; name: string }[]>([])
 
-  // Load sites from Supabase for the site picker
+  // Load sites
   useEffect(() => {
     supabase
       .from('sites')
@@ -128,10 +131,22 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
         setSites((data ?? []).map((s: any) => ({
           id: s.id,
           name: s.name,
-          city: s.cities?.name ?? s.city ?? '',
+          city: s.cities?.name ?? '',
         })))
       })
   }, [])
+
+  // Load buildings when site changes
+  useEffect(() => {
+    if (!siteId) { setBuildings([]); return }
+    supabase
+      .from('buildings')
+      .select('id, name')
+      .eq('tenant_id', tenantId)
+      .eq('site_id', siteId)
+      .order('name')
+      .then(({ data }) => setBuildings(data ?? []))
+  }, [siteId, tenantId])
 
   const f = <K extends keyof FormData>(key: K) => (val: FormData[K]) =>
     setForm(prev => ({ ...prev, [key]: val }))
@@ -181,12 +196,23 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
         .insert({
           tenant_id:       tenantId,
           site_id:         siteId || null,
-          site_name:       sites.find(s => s.id === siteId)?.name ?? form.city,
+          site_name:       sites.find(s => s.id === siteId)?.name ?? null,
+          building_name:   form.building || null,
           meter_id:        meterId,
           ean_code:        form.ean_code || `EAN-${Date.now()}`,
-          connection_type: form.product,
-          capacity:        form.connection_value || '—',
+          product:         form.product,
+          connection_type: form.connection_type || form.product,
+          supplier:        form.supplier || null,
+          grid_operator:   form.grid_operator || null,
+          capacity:        form.connection_value || null,
           status:          form.status,
+          address:         form.address || null,
+          department:      form.department || null,
+          usage_category:  form.usage_category || null,
+          remarks:         form.remarks || null,
+          active_since:    form.active_since || null,
+          contract:        form.contract || null,
+          meter_number:    form.meter_number || null,
           latitude:        form.gps ? parseFloat(form.gps.split(',')[0]) : null,
           longitude:       form.gps ? parseFloat(form.gps.split(',')[1]) : null,
         })
@@ -241,17 +267,28 @@ export default function AddConnectionPanel({ onClose, onSave }: Props) {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto">
 
-          {/* Site picker — always visible at top */}
-          <div className="px-4 py-3 bg-accent/5 border-b border-border-subtle">
+          {/* Site + Building pickers — always visible at top */}
+          <div className="px-4 py-3 bg-accent/5 border-b border-border-subtle space-y-2">
             <div className="flex items-center gap-3">
               <label className="text-[10px] text-white/40 w-[148px] min-w-[148px]">Link to site</label>
-              <select className={selectCls} value={siteId} onChange={e => setSiteId(e.target.value)}>
+              <select className={selectCls} value={siteId} onChange={e => { setSiteId(e.target.value); f('building')('') }}>
                 <option value="">— No site (add later) —</option>
                 {sites.map(s => (
                   <option key={s.id} value={s.id}>{s.name}{s.city ? ` · ${s.city}` : ''}</option>
                 ))}
               </select>
             </div>
+            {siteId && (
+              <div className="flex items-center gap-3">
+                <label className="text-[10px] text-white/40 w-[148px] min-w-[148px]">Link to building</label>
+                <select className={selectCls} value={form.building} onChange={e => f('building')(e.target.value)}>
+                  <option value="">— No building (add later) —</option>
+                  {buildings.map(b => (
+                    <option key={b.id} value={b.name}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             {sites.length === 0 && (
               <p className="text-[10px] text-amber-400/70 mt-1.5 ml-[160px]">
                 No sites yet — <a href="/sites" className="underline hover:text-amber-400">add a site first</a> or leave blank.
