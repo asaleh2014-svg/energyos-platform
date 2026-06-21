@@ -474,15 +474,29 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
   const TT = { background: '#0d2b35', border: '1px solid #1a5568', borderRadius: 8, fontSize: 11 }
   const [showAddConn, setShowAddConn] = useState(false)
 
-  // Fetch connections for this site
+  // Fetch connections: prefer those linked to this building, fall back to site
   useEffect(() => {
-    supabase
-      .from('energy_connections')
-      .select('*')
-      .eq('tenant_id', tenantId)
-      .eq('site_id', building.site_id)
-      .then(({ data }) => setConnections(data ?? []))
-  }, [building.site_id, tenantId])
+    async function loadConns() {
+      // First try: connections with building_name matching this building
+      const { data: linked } = await supabase
+        .from('energy_connections')
+        .select('*')
+        .eq('tenant_id', tenantId)
+        .eq('building_name', building.name)
+      if (linked && linked.length > 0) {
+        setConnections(linked)
+      } else {
+        // Fall back to all connections at the site
+        const { data: site } = await supabase
+          .from('energy_connections')
+          .select('*')
+          .eq('tenant_id', tenantId)
+          .eq('site_id', building.site_id)
+        setConnections(site ?? [])
+      }
+    }
+    loadConns()
+  }, [building.name, building.site_id, tenantId])
 
   // Fetch consumption records for those connections
   useEffect(() => {
@@ -791,7 +805,7 @@ function BuildingList() {
 
   const [buildings, setBuildings] = useState<DBBuilding[]>([])
   const [connectionsBySite, setConnectionsBySite] = useState<Record<string, DBConnection[]>>({})
-  const [consumptionBySite, setConsumptionBySite] = useState<Record<string, number>>({})
+  const [consumptionByBuilding, setConsumptionByBuilding] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -803,40 +817,72 @@ function BuildingList() {
         .eq('tenant_id', tenantId)
       if (siteFilter) query = query.eq('site_id', siteFilter)
       const { data: bldgs } = await query
-      setBuildings(bldgs ?? [])
+      const bldgList = bldgs ?? []
+      setBuildings(bldgList)
 
-      // Load all connections grouped by site_id
+      // Load all connections
       const { data: conns } = await supabase
         .from('energy_connections')
         .select('*')
         .eq('tenant_id', tenantId)
+      const allConns = conns ?? []
+
+      // Group by site for the connections-per-building expand rows
       const grouped: Record<string, DBConnection[]> = {}
-      const connToSite: Record<string, string> = {}
-      for (const c of (conns ?? [])) {
+      for (const c of allConns) {
         if (!c.site_id) continue
         if (!grouped[c.site_id]) grouped[c.site_id] = []
         grouped[c.site_id].push(c)
-        connToSite[c.id] = c.site_id
       }
       setConnectionsBySite(grouped)
 
-      // Fetch all electricity consumption and sum by site
-      const connIds = Object.keys(connToSite)
+      // Map connection_id → building_name and connection_id → site_id
+      const connToBuilding: Record<string, string> = {}
+      const connToSite: Record<string, string> = {}
+      for (const c of allConns) {
+        if (c.building_name) connToBuilding[c.id] = c.building_name
+        if (c.site_id)       connToSite[c.id]    = c.site_id
+      }
+
+      const connIds = allConns.map(c => c.id)
       if (connIds.length > 0) {
         const { data: recs } = await supabase
           .from('consumption_records')
           .select('connection_id, consumption, unit')
           .eq('tenant_id', tenantId)
           .in('connection_id', connIds)
+
+        // Sum kWh by building_name (directly linked) and by site (fallback pool)
+        const byBuilding: Record<string, number> = {}
         const bySite: Record<string, number> = {}
         for (const r of (recs ?? [])) {
-          const sId = connToSite[r.connection_id]
-          if (!sId) continue
-          // Only count kWh (electricity); skip m³ gas for EUI
-          if (r.unit && r.unit.toLowerCase().includes('m')) continue
-          bySite[sId] = (bySite[sId] ?? 0) + (r.consumption ?? 0)
+          if (r.unit && r.unit.toLowerCase().includes('m')) continue // skip gas m³
+          const kwh = r.consumption ?? 0
+          const bName = connToBuilding[r.connection_id]
+          const sId   = connToSite[r.connection_id]
+          if (bName) {
+            byBuilding[bName] = (byBuilding[bName] ?? 0) + kwh
+          } else if (sId) {
+            bySite[sId] = (bySite[sId] ?? 0) + kwh
+          }
         }
-        setConsumptionBySite(bySite)
+
+        // For buildings with no directly linked connections, divide site pool equally
+        // among unlinked buildings at that site
+        const linkedNames = new Set(Object.keys(byBuilding))
+        const unlinkedBySite: Record<string, DBBuilding[]> = {}
+        for (const b of bldgList) {
+          if (!linkedNames.has(b.name) && bySite[b.site_id]) {
+            if (!unlinkedBySite[b.site_id]) unlinkedBySite[b.site_id] = []
+            unlinkedBySite[b.site_id].push(b)
+          }
+        }
+        for (const [sId, siteBuildings] of Object.entries(unlinkedBySite)) {
+          const share = (bySite[sId] ?? 0) / siteBuildings.length
+          for (const b of siteBuildings) byBuilding[b.name] = share
+        }
+
+        setConsumptionByBuilding(byBuilding)
       }
 
       setLoading(false)
@@ -857,7 +903,7 @@ function BuildingList() {
     id: b.id,
     name: b.name,
     area_m2: b.area_m2 ?? 1,
-    elec_kwh_year: consumptionBySite[b.site_id] ?? 0,
+    elec_kwh_year: consumptionByBuilding[b.name] ?? 0,
     energy_label: (b.energy_label ?? 'C') as EnergyLabel,
   }))
 
@@ -926,7 +972,7 @@ function BuildingList() {
               </thead>
               <tbody>
                 {filtered.map(b => (
-                  <BuildingRow key={b.id} building={b} connections={connectionsBySite[b.site_id] ?? []} elecKwh={consumptionBySite[b.site_id] ?? 0} />
+                  <BuildingRow key={b.id} building={b} connections={connectionsBySite[b.site_id] ?? []} elecKwh={consumptionByBuilding[b.name] ?? 0} />
                 ))}
                 {filtered.length === 0 && (
                   <tr><td colSpan={10} className="tbl-td text-center text-white/30 py-8">No buildings match</td></tr>

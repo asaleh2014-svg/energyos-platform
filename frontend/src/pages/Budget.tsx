@@ -52,10 +52,27 @@ export default function Budget() {
   const [loading, setLoading]     = useState(true)
   const [budgets, setBudgets]     = useState<BudgetRow[]>([])
   const [actuals, setActuals]     = useState<ActualRow[]>([])
+  const [availableYears, setAvailableYears] = useState<number[]>([])
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [preset,       setPreset]        = useState<PeriodPreset>('full')
   const [customStart,  setCustomStart]   = useState(0)
   const [customEnd,    setCustomEnd]     = useState(11)
+
+  // On first load, find the most recent year with budget data
+  useEffect(() => {
+    supabase
+      .from('budgets')
+      .select('year')
+      .eq('tenant_id', tenantId)
+      .order('year', { ascending: false })
+      .then(({ data }) => {
+        const years = [...new Set((data ?? []).map((r: any) => Number(r.year)))].sort((a, b) => b - a)
+        if (years.length > 0) {
+          setAvailableYears(years)
+          setSelectedYear(years[0])
+        }
+      })
+  }, [tenantId])
 
   useEffect(() => {
     async function load() {
@@ -173,7 +190,7 @@ export default function Budget() {
         <div className="flex flex-wrap items-center gap-3 mb-6">
           {/* Year selector */}
           <select className="form-select text-sm" value={selectedYear} onChange={e => setSelectedYear(+e.target.value)}>
-            {[2023,2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
+            {(availableYears.length > 0 ? availableYears : [2023,2024,2025,2026,2027]).map(y => <option key={y} value={y}>{y}</option>)}
           </select>
 
           {/* Period presets */}

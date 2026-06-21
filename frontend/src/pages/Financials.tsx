@@ -338,7 +338,7 @@ function CostSummaryTab({ tenantId, currencySymbol }: { tenantId: string; curren
 function DeviationsTab({ tenantId, currencySymbol }: { tenantId: string; currencySymbol: string }) {
   const [loading,  setLoading]  = useState(true)
   const [monthly,  setMonthly]  = useState<any[]>([])
-  const [year,     setYear]     = useState(new Date().getFullYear())
+  const [year,     setYear]     = useState(2025)
 
   useEffect(() => {
     async function load() {
@@ -386,7 +386,7 @@ function DeviationsTab({ tenantId, currencySymbol }: { tenantId: string; currenc
     <div className="space-y-5">
       <div className="flex items-center gap-3 mb-2">
         <select className="form-select text-sm" value={year} onChange={e => setYear(+e.target.value)}>
-          {[2023,2024,2025,2026].map(y => <option key={y} value={y}>{y}</option>)}
+          {[2023,2024,2025].map(y => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
 
@@ -543,7 +543,7 @@ function Sidebar({ filters, setFilters }: {
       <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
         <span className="text-sm font-semibold text-white">Filters</span>
         <button
-          onClick={() => setFilters({ product:'electricity', year:'2026', savings:0 })}
+          onClick={() => setFilters({ product:'electricity', year:'2025', savings:0 })}
           className="text-white/30 hover:text-white/70 transition-colors"
           title="Reset filters">
           <RefreshCw size={13} />
@@ -568,7 +568,7 @@ function Sidebar({ filters, setFilters }: {
           <div className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest mb-2 pb-1 border-b border-border-subtle">Period</div>
           <select value={filters.year} onChange={e => set('year')(e.target.value)}
             className="w-full bg-bg-card border border-border-subtle text-white/70 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent">
-            {['2023','2024','2025','2026','2027'].map(y => <option key={y}>{y}</option>)}
+            {['2023','2024','2025'].map(y => <option key={y}>{y}</option>)}
           </select>
         </div>
 
@@ -600,7 +600,7 @@ export default function Financials() {
 
   const [tab, setTab] = useState<Tab>('tariffs')
   const [filters, setFilters] = useState<SidebarFilters>({
-    product: 'electricity', year: '2026', savings: 0,
+    product: 'electricity', year: '2025', savings: 0,
   })
 
   return (
