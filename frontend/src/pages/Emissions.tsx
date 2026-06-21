@@ -1,103 +1,101 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
-import { useAppStore } from '@/lib/store'
+import { useTenantId } from '@/lib/auth'
 import { useNavigate } from 'react-router-dom'
-import {
-  MOCK_CONNECTIONS, MOCK_SITES,
-  CO2_FACTORS, DEFAULT_SITE_ELEC_SOURCES, METER_ANNUAL_CONSUMPTION,
-  SITE_CONNECTIONS, calcElecFactor,
-  type ElecSource,
-} from '@/lib/mockData'
+import { fetchConnections, fetchConsumption, co2Tonnes } from '@/lib/dbQueries'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Cell, Legend,
 } from 'recharts'
-import { Leaf, Zap, Flame, ExternalLink } from 'lucide-react'
+import { Leaf, Zap, Flame, ExternalLink, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
 import { ChartCard } from '@/components/ChartCard'
 
 const TT = { background:'#111520', border:'1px solid #ffffff20', borderRadius:8, fontSize:12 }
 
-const SOURCE_COLORS: Record<string, string> = {
-  gas_fired: '#f59e0b',
-  coal:      '#78716c',
-  renewable: '#10b981',
-  mix:       '#3b82f6',
-}
-const SOURCE_LABELS: Record<string, string> = {
-  gas_fired: 'Gas Fired',
-  coal:      'Coal',
-  renewable: 'Renewable',
-  mix:       'Grid Mix',
-}
-
 type ViewLevel = 'portfolio' | 'city' | 'site' | 'meter'
 
-// helper: CO2 for a connection using its site's mix
-function calcConnCO2(connId: string, mix: ElecSource): number {
-  const consumption = METER_ANNUAL_CONSUMPTION[connId]
-  if (!consumption) return 0
-  if (consumption.electricity) {
-    return (consumption.electricity * calcElecFactor(mix)) / 1000
-  }
-  if (consumption.gas) {
-    return (consumption.gas * CO2_FACTORS.gas_m3) / 1000
-  }
-  return 0
+interface MeterCO2 {
+  id: string
+  label: string
+  site: string
+  siteName: string
+  city: string
+  type: string
+  tco2: number
+  elecTco2: number
+  gasTco2: number
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
 export default function Emissions() {
-  const { siteMixes } = useAppStore()
+  const tenantId = useTenantId()
   const navigate = useNavigate()
   const [view, setView] = useState<ViewLevel>('portfolio')
+  const [loading, setLoading] = useState(true)
+  const [meterCO2, setMeterCO2] = useState<MeterCO2[]>([])
 
-  // Build per-connection mix from site-level mixes
-  const connMix = (connId: string): ElecSource => {
-    const site = MOCK_CONNECTIONS.find(c => c.id === connId)
-    if (!site) return DEFAULT_SITE_ELEC_SOURCES['site-1']
-    const siteId = site.site_id
-    return siteMixes[siteId] ?? DEFAULT_SITE_ELEC_SOURCES[siteId] ?? DEFAULT_SITE_ELEC_SOURCES['site-1']
-  }
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      const [conns, records] = await Promise.all([
+        fetchConnections(tenantId),
+        fetchConsumption(tenantId),
+      ])
 
-  // ── Per-meter CO₂ ────────────────────────────────────────────────────────────
-  const meterCO2 = MOCK_CONNECTIONS.map(c => {
-    const tco2 = calcConnCO2(c.id, connMix(c.id))
-    const consumption = METER_ANNUAL_CONSUMPTION[c.id]
-    const isGas = c.connection_type === 'Gas'
-    return {
-      id: c.id,
-      label: c.meter.meter_number,
-      site: c.site_name,
-      type: c.connection_type,
-      tco2: Math.round(tco2 * 10) / 10,
-      elecTco2:  isGas ? 0 : Math.round(tco2 * 10) / 10,
-      gasTco2:   isGas ? Math.round(tco2 * 10) / 10 : 0,
-      consumption,
+      // Aggregate consumption per connection
+      const connElec: Record<string, number> = {}
+      const connGas: Record<string, number> = {}
+      for (const r of records) {
+        const cid = r.connection_id
+        if (!cid) continue
+        if (r.unit === 'kWh') connElec[cid] = (connElec[cid] ?? 0) + Number(r.consumption)
+        else connGas[cid] = (connGas[cid] ?? 0) + Number(r.consumption)
+      }
+
+      const meters: MeterCO2[] = conns.map((c: any) => {
+        const elec = connElec[c.id] ?? 0
+        const gas  = connGas[c.id]  ?? 0
+        const elecTco2 = (elec * 0.45) / 1000
+        const gasTco2  = (gas  * 2.04) / 1000
+        const tco2 = Math.round((elecTco2 + gasTco2) * 10) / 10
+        return {
+          id:       c.id,
+          label:    c.ean_code ?? c.id,
+          site:     c.site_name ?? 'Unknown',
+          siteName: c.site_name ?? 'Unknown',
+          city:     'UAE',
+          type:     c.connection_type ?? 'Electricity',
+          tco2,
+          elecTco2: Math.round(elecTco2 * 10) / 10,
+          gasTco2:  Math.round(gasTco2  * 10) / 10,
+        }
+      }).filter((m: MeterCO2) => m.tco2 > 0)
+
+      setMeterCO2(meters)
+      setLoading(false)
     }
-  }).filter(m => m.tco2 > 0)
+    load()
+  }, [tenantId])
 
-  // ── Per-site CO₂ ─────────────────────────────────────────────────────────────
-  const siteMap: Record<string, { elec: number; gas: number; site: string }> = {}
+  // Per-site aggregation
+  const siteMap: Record<string, { elec: number; gas: number }> = {}
   meterCO2.forEach(m => {
-    if (!siteMap[m.site]) siteMap[m.site] = { elec:0, gas:0, site:m.site }
-    siteMap[m.site].elec += m.elecTco2
-    siteMap[m.site].gas  += m.gasTco2
+    if (!siteMap[m.siteName]) siteMap[m.siteName] = { elec: 0, gas: 0 }
+    siteMap[m.siteName].elec += m.elecTco2
+    siteMap[m.siteName].gas  += m.gasTco2
   })
-  const siteCO2 = Object.values(siteMap).map(s => ({
-    label: s.site.replace(' Zone','').replace(' Hub','').replace(' Tower',''),
-    electricity: Math.round(s.elec * 10) / 10,
-    gas:         Math.round(s.gas  * 10) / 10,
-    total:       Math.round((s.elec + s.gas) * 10) / 10,
-  }))
+  const siteCO2 = Object.entries(siteMap).map(([site, d]) => ({
+    label:       site.replace(' Zone','').replace(' Hub','').replace(' Tower',''),
+    electricity: Math.round(d.elec * 10) / 10,
+    gas:         Math.round(d.gas  * 10) / 10,
+    total:       Math.round((d.elec + d.gas) * 10) / 10,
+  })).sort((a, b) => b.total - a.total)
 
-  // ── Per-city CO₂ ─────────────────────────────────────────────────────────────
+  // Per-city aggregation
   const cityMap: Record<string, { elec: number; gas: number }> = {}
   meterCO2.forEach(m => {
-    const conn = MOCK_CONNECTIONS.find(c => c.site_name === m.site)
-    const site = conn ? MOCK_SITES.find(s => s.id === conn.site_id) : null
-    const city = site?.city ?? 'Unknown'
-    if (!cityMap[city]) cityMap[city] = { elec:0, gas:0 }
+    const city = m.city || 'Unknown'
+    if (!cityMap[city]) cityMap[city] = { elec: 0, gas: 0 }
     cityMap[city].elec += m.elecTco2
     cityMap[city].gas  += m.gasTco2
   })
@@ -108,17 +106,30 @@ export default function Emissions() {
     total:       Math.round((d.elec + d.gas) * 10) / 10,
   })).sort((a, b) => b.total - a.total)
 
-  // ── Portfolio totals ──────────────────────────────────────────────────────────
-  const totalElecCO2 = Math.round(meterCO2.reduce((a,m) => a+m.elecTco2, 0) * 10) / 10
-  const totalGasCO2  = Math.round(meterCO2.reduce((a,m) => a+m.gasTco2,  0) * 10) / 10
-  const totalCO2     = totalElecCO2 + totalGasCO2
+  const totalElecCO2 = Math.round(meterCO2.reduce((a, m) => a + m.elecTco2, 0) * 10) / 10
+  const totalGasCO2  = Math.round(meterCO2.reduce((a, m) => a + m.gasTco2,  0) * 10) / 10
+  const totalCO2     = Math.round((totalElecCO2 + totalGasCO2) * 10) / 10
+
+  // Total kWh for intensity
+  const totalKwh = meterCO2.reduce((a, m) => a + m.elecTco2 / 0.45 * 1000, 0)
+
+  if (loading) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <Topbar title="CO₂ Emissions" subtitle="Greenhouse gas emissions — electricity & gas" />
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 size={24} className="animate-spin text-white/30" />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <Topbar title="CO₂ Emissions" subtitle="Greenhouse gas emissions — electricity & gas" />
       <div className="flex-1 overflow-y-auto p-6">
 
-        {/* ── Portfolio KPI row ───────────────────────────────────────────── */}
+        {/* ── Portfolio KPI row ─────────────────────────────────────────── */}
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="card">
             <div className="label mb-1 flex items-center gap-1"><Leaf size={11}/> Total Portfolio CO₂</div>
@@ -128,23 +139,23 @@ export default function Emissions() {
           <div className="card">
             <div className="label mb-1 flex items-center gap-1"><Zap size={11} className="text-blue-400"/> Electricity CO₂</div>
             <div className="text-2xl font-semibold text-blue-300">{totalElecCO2.toFixed(1)}</div>
-            <div className="text-xs text-white/40 mt-1">{((totalElecCO2/totalCO2)*100).toFixed(0)}% of total</div>
+            <div className="text-xs text-white/40 mt-1">{totalCO2 > 0 ? ((totalElecCO2/totalCO2)*100).toFixed(0) : 0}% of total</div>
           </div>
           <div className="card">
             <div className="label mb-1 flex items-center gap-1"><Flame size={11} className="text-amber-400"/> Gas CO₂</div>
             <div className="text-2xl font-semibold text-amber-300">{totalGasCO2.toFixed(1)}</div>
-            <div className="text-xs text-white/40 mt-1">{((totalGasCO2/totalCO2)*100).toFixed(0)}% of total</div>
+            <div className="text-xs text-white/40 mt-1">{totalCO2 > 0 ? ((totalGasCO2/totalCO2)*100).toFixed(0) : 0}% of total</div>
           </div>
           <div className="card">
             <div className="label mb-1">CO₂ Intensity</div>
             <div className="text-2xl font-semibold text-white">
-              {(totalCO2 / (878000 / 1000)).toFixed(2)}
+              {totalKwh > 0 ? (totalCO2 / (totalKwh / 1000)).toFixed(2) : '—'}
             </div>
             <div className="text-xs text-white/40 mt-1">tCO₂ / MWh consumed</div>
           </div>
         </div>
 
-        {/* ── Baseline comparison strip ────────────────────────────────── */}
+        {/* ── Baseline comparison strip ──────────────────────────────── */}
         <div className="card mb-5 border-purple/20 bg-purple/5">
           <div className="flex items-center justify-between mb-3">
             <div>
@@ -160,10 +171,10 @@ export default function Emissions() {
           </div>
           <div className="grid grid-cols-4 gap-4">
             {[
-              { label: 'Baseline (2018)',   val: `${(totalCO2 * 1.28).toFixed(0)} tCO₂`, color: '#8b5cf6', sub: 'Reference year' },
-              { label: 'Current (2026)',    val: `${totalCO2.toFixed(0)} tCO₂`,           color: '#3b82f6', sub: 'This year' },
+              { label: 'Baseline (2018)',    val: `${(totalCO2 * 1.28).toFixed(0)} tCO₂`, color: '#8b5cf6', sub: 'Reference year' },
+              { label: 'Current (2026)',     val: `${totalCO2.toFixed(0)} tCO₂`,          color: '#3b82f6', sub: 'This year' },
               { label: 'Reduction vs Base', val: `−${((1 - totalCO2 / (totalCO2 * 1.28)) * 100).toFixed(1)}%`, color: '#10b981', sub: 'Progress toward target' },
-              { label: '2030 Target',       val: `${(totalCO2 * 0.65).toFixed(0)} tCO₂`,  color: '#f59e0b', sub: '−35% vs baseline' },
+              { label: '2030 Target',        val: `${(totalCO2 * 0.65).toFixed(0)} tCO₂`, color: '#f59e0b', sub: '−35% vs baseline' },
             ].map(d => (
               <div key={d.label} className="bg-bg-card rounded-xl p-3 border border-border-subtle">
                 <div className="text-xs text-white/40 mb-1">{d.label}</div>
@@ -172,7 +183,6 @@ export default function Emissions() {
               </div>
             ))}
           </div>
-          {/* Progress bar */}
           <div className="mt-3">
             <div className="flex justify-between text-[10px] text-white/30 mb-1">
               <span>0%</span><span>Current: {((1 - totalCO2 / (totalCO2 * 1.28)) * 100).toFixed(1)}% reduction achieved</span><span>Target: 35%</span>
@@ -180,12 +190,11 @@ export default function Emissions() {
             <div className="w-full bg-bg-secondary rounded-full h-2 overflow-hidden relative">
               <div className="h-full rounded-full bg-gradient-to-r from-purple to-accent transition-all"
                 style={{ width: `${Math.min(100, ((1 - totalCO2 / (totalCO2 * 1.28)) / 0.35) * 100).toFixed(0)}%` }} />
-              <div className="absolute top-0 h-full w-0.5 bg-success/60" style={{ left: '100%' }} />
             </div>
           </div>
         </div>
 
-        {/* ── View level tabs ─────────────────────────────────────────────── */}
+        {/* ── View level tabs ───────────────────────────────────────────── */}
         <div className="flex items-center gap-1 mb-5 bg-bg-secondary border border-border-subtle rounded-xl p-1 w-fit">
           {(['portfolio','city','site','meter'] as ViewLevel[]).map(v => (
             <button key={v} onClick={() => setView(v)}
@@ -197,7 +206,7 @@ export default function Emissions() {
           ))}
         </div>
 
-        {/* ── Charts ─────────────────────────────────────────────────────── */}
+        {/* ── Charts ─────────────────────────────────────────────────── */}
         {view === 'portfolio' && (
           <ChartCard
             title="Portfolio CO₂ — by Source Type"
@@ -212,7 +221,7 @@ export default function Emissions() {
                       <td className="tbl-td text-blue-300">{s.electricity.toFixed(1)}</td>
                       <td className="tbl-td text-amber-300">{s.gas.toFixed(1)}</td>
                       <td className="tbl-td text-white font-semibold">{s.total.toFixed(1)}</td>
-                      <td className="tbl-td text-white/60">{((s.total/totalCO2)*100).toFixed(1)}%</td>
+                      <td className="tbl-td text-white/60">{totalCO2>0?((s.total/totalCO2)*100).toFixed(1):0}%</td>
                     </tr>
                   ))}
                 </tbody>
@@ -220,16 +229,15 @@ export default function Emissions() {
             }
           >
             <div className="flex items-center gap-8">
-              {/* Donut-style summary */}
               <div className="flex flex-col items-center gap-2 min-w-[160px]">
                 <div className="relative w-32 h-32">
                   <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
                     <circle cx="18" cy="18" r="14" fill="none" stroke="#ffffff08" strokeWidth="4" />
                     <circle cx="18" cy="18" r="14" fill="none" stroke="#3b82f6" strokeWidth="4"
-                      strokeDasharray={`${(totalElecCO2/totalCO2*87.96).toFixed(1)} 87.96`} />
+                      strokeDasharray={`${totalCO2>0?(totalElecCO2/totalCO2*87.96).toFixed(1):0} 87.96`} />
                     <circle cx="18" cy="18" r="14" fill="none" stroke="#f59e0b" strokeWidth="4"
-                      strokeDasharray={`${(totalGasCO2/totalCO2*87.96).toFixed(1)} 87.96`}
-                      strokeDashoffset={`-${(totalElecCO2/totalCO2*87.96).toFixed(1)}`} />
+                      strokeDasharray={`${totalCO2>0?(totalGasCO2/totalCO2*87.96).toFixed(1):0} 87.96`}
+                      strokeDashoffset={`-${totalCO2>0?(totalElecCO2/totalCO2*87.96).toFixed(1):0}`} />
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
                     <div className="text-lg font-bold text-white">{totalCO2.toFixed(0)}</div>
@@ -251,15 +259,14 @@ export default function Emissions() {
                   ))}
                 </div>
               </div>
-              {/* Stacked by site */}
               <div className="flex-1">
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={siteCO2} margin={{top:0,right:0,left:-10,bottom:0}}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08"/>
                     <XAxis dataKey="label" tick={{fill:'#5a6385',fontSize:10}} axisLine={false} tickLine={false}/>
                     <YAxis tick={{fill:'#5a6385',fontSize:10}} axisLine={false} tickLine={false} unit=" t"/>
-                    <Tooltip contentStyle={TT} formatter={(v:number, name:string) => [`${v.toFixed(1)} tCO₂`, name === 'electricity' ? '⚡ Electricity' : '🔥 Gas']}/>
-                    <Legend wrapperStyle={{fontSize:11,color:'#5a6385'}} formatter={v => v === 'electricity' ? '⚡ Electricity' : '🔥 Gas'}/>
+                    <Tooltip contentStyle={TT} formatter={(v:number, name:string) => [`${(v as number).toFixed(1)} tCO₂`, name === 'electricity' ? 'Electricity' : 'Gas']}/>
+                    <Legend wrapperStyle={{fontSize:11,color:'#5a6385'}} formatter={v => v === 'electricity' ? 'Electricity' : 'Gas'}/>
                     <Bar dataKey="electricity" name="electricity" stackId="a" fill="#3b82f6" opacity={0.85} radius={[0,0,0,0]}/>
                     <Bar dataKey="gas"         name="gas"         stackId="a" fill="#f59e0b" opacity={0.85} radius={[3,3,0,0]}/>
                   </BarChart>
@@ -283,7 +290,7 @@ export default function Emissions() {
                       <td className="tbl-td text-blue-300">{c.electricity.toFixed(1)}</td>
                       <td className="tbl-td text-amber-300">{c.gas.toFixed(1)}</td>
                       <td className="tbl-td text-white font-semibold">{c.total.toFixed(1)}</td>
-                      <td className="tbl-td text-white/60">{((c.total/totalCO2)*100).toFixed(1)}%</td>
+                      <td className="tbl-td text-white/60">{totalCO2>0?((c.total/totalCO2)*100).toFixed(1):0}%</td>
                     </tr>
                   ))}
                 </tbody>
@@ -295,8 +302,8 @@ export default function Emissions() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08"/>
                 <XAxis dataKey="label" tick={{fill:'#5a6385',fontSize:11}} axisLine={false} tickLine={false}/>
                 <YAxis tick={{fill:'#5a6385',fontSize:10}} axisLine={false} tickLine={false} unit=" t"/>
-                <Tooltip contentStyle={TT} formatter={(v:number, name:string) => [`${v.toFixed(1)} tCO₂`, name === 'electricity' ? '⚡ Electricity' : '🔥 Gas']}/>
-                <Legend wrapperStyle={{fontSize:11,color:'#5a6385'}} formatter={v => v === 'electricity' ? '⚡ Electricity' : '🔥 Gas'}/>
+                <Tooltip contentStyle={TT} formatter={(v:number, name:string) => [`${(v as number).toFixed(1)} tCO₂`, name === 'electricity' ? 'Electricity' : 'Gas']}/>
+                <Legend wrapperStyle={{fontSize:11,color:'#5a6385'}} formatter={v => v === 'electricity' ? 'Electricity' : 'Gas'}/>
                 <Bar dataKey="electricity" name="electricity" stackId="a" fill="#3b82f6" opacity={0.85} radius={[0,0,0,0]}/>
                 <Bar dataKey="gas"         name="gas"         stackId="a" fill="#f59e0b" opacity={0.85} radius={[3,3,0,0]}/>
               </BarChart>
@@ -318,7 +325,7 @@ export default function Emissions() {
                       <td className="tbl-td text-blue-300">{s.electricity.toFixed(1)}</td>
                       <td className="tbl-td text-amber-300">{s.gas.toFixed(1)}</td>
                       <td className="tbl-td text-white font-semibold">{s.total.toFixed(1)}</td>
-                      <td className="tbl-td text-white/60">{((s.total/totalCO2)*100).toFixed(1)}%</td>
+                      <td className="tbl-td text-white/60">{totalCO2>0?((s.total/totalCO2)*100).toFixed(1):0}%</td>
                     </tr>
                   ))}
                 </tbody>
@@ -330,8 +337,8 @@ export default function Emissions() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08"/>
                 <XAxis dataKey="label" tick={{fill:'#5a6385',fontSize:10}} axisLine={false} tickLine={false}/>
                 <YAxis tick={{fill:'#5a6385',fontSize:10}} axisLine={false} tickLine={false} unit=" t"/>
-                <Tooltip contentStyle={TT} formatter={(v:number, name:string) => [`${v.toFixed(1)} tCO₂`, name === 'electricity' ? '⚡ Electricity' : '🔥 Gas']}/>
-                <Legend wrapperStyle={{fontSize:11,color:'#5a6385'}} formatter={v => v === 'electricity' ? '⚡ Electricity' : '🔥 Gas'}/>
+                <Tooltip contentStyle={TT} formatter={(v:number, name:string) => [`${(v as number).toFixed(1)} tCO₂`, name === 'electricity' ? 'Electricity' : 'Gas']}/>
+                <Legend wrapperStyle={{fontSize:11,color:'#5a6385'}} formatter={v => v === 'electricity' ? 'Electricity' : 'Gas'}/>
                 <Bar dataKey="electricity" name="electricity" stackId="a" fill="#3b82f6" opacity={0.85} radius={[0,0,0,0]}>
                   {siteCO2.map((_, i) => <Cell key={i} />)}
                 </Bar>
@@ -364,13 +371,13 @@ export default function Emissions() {
               </table>
             }
           >
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={Math.max(240, meterCO2.length * 28)}>
               <BarChart data={meterCO2} layout="vertical" margin={{top:0,right:20,left:10,bottom:0}}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" horizontal={false}/>
                 <XAxis type="number" tick={{fill:'#5a6385',fontSize:10}} axisLine={false} tickLine={false} unit=" t"/>
-                <YAxis type="category" dataKey="label" tick={{fill:'#5a6385',fontSize:10}} axisLine={false} tickLine={false} width={100}/>
-                <Tooltip contentStyle={TT} formatter={(v:number,name:string)=>[`${v.toFixed(1)} tCO₂`, name==='elecTco2'?'⚡ Electricity':'🔥 Gas']}/>
-                <Legend wrapperStyle={{fontSize:11,color:'#5a6385'}} formatter={v=>v==='elecTco2'?'⚡ Electricity':'🔥 Gas'}/>
+                <YAxis type="category" dataKey="label" tick={{fill:'#5a6385',fontSize:10}} axisLine={false} tickLine={false} width={120}/>
+                <Tooltip contentStyle={TT} formatter={(v:number,name:string)=>[`${(v as number).toFixed(1)} tCO₂`, name==='elecTco2'?'Electricity':'Gas']}/>
+                <Legend wrapperStyle={{fontSize:11,color:'#5a6385'}} formatter={v=>v==='elecTco2'?'Electricity':'Gas'}/>
                 <Bar dataKey="elecTco2" name="elecTco2" stackId="a" fill="#3b82f6" opacity={0.85} radius={[0,0,0,0]}/>
                 <Bar dataKey="gasTco2"  name="gasTco2"  stackId="a" fill="#f59e0b" opacity={0.85} radius={[0,3,3,0]}/>
               </BarChart>
@@ -378,15 +385,14 @@ export default function Emissions() {
           </ChartCard>
         )}
 
-        {/* ── Energy mix config notice ───────────────────────────────────── */}
+        {/* ── Notice ───────────────────────────────────────────────────── */}
         <div className="mt-6 p-4 rounded-xl border border-accent/20 bg-accent/5 flex items-start gap-3">
           <Zap size={16} className="text-accent mt-0.5 flex-shrink-0" />
           <div className="flex-1">
-            <div className="text-sm font-semibold text-white mb-1">Energy source mix is configured per site</div>
+            <div className="text-sm font-semibold text-white mb-1">CO₂ factors: Electricity 0.45 kgCO₂/kWh · Gas 2.04 kgCO₂/m³</div>
             <p className="text-xs text-white/50 leading-relaxed">
-              Emission factors are derived from each site's electricity source mix (DEWA, ADC, SEWA, FEWA UAE-standard defaults).
-              CO₂ factors: Gas Fired {CO2_FACTORS.electricity.gas_fired} · Coal {CO2_FACTORS.electricity.coal} · Renewable {CO2_FACTORS.electricity.renewable} · Grid Mix {CO2_FACTORS.electricity.mix} kgCO₂/kWh.
-              To adjust the mix for a site (and optionally apply to all sites in the same city), go to the Sites page.
+              Emissions are calculated from real consumption records imported via the Analytics page.
+              Electricity uses a UAE grid-average factor of 0.45 kgCO₂/kWh; gas uses 2.04 kgCO₂/m³.
             </p>
           </div>
           <button

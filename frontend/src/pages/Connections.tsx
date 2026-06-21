@@ -5,19 +5,85 @@ import {
   Download, RefreshCw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   X, List, Map as MapIcon, Zap, Flame, Droplets,
 } from 'lucide-react'
-import { MOCK_CONNECTIONS as _MC } from '@/lib/mockData'
-void _MC
 import clsx from 'clsx'
 import {
-  FULL_CONNECTIONS, PRODUCTS, STATUSES, SUPPLIERS, GRID_OPERATORS,
+  PRODUCTS, STATUSES, SUPPLIERS, GRID_OPERATORS,
   MEAS_COMPANIES, CONN_TYPES, DEPARTMENTS, BUILDINGS, MARKET_SEGS,
   MONITORINGS, CHARACTERISTICS, USAGE_CATS, TAX_CLUSTERS, CLIENTS,
   type FullConnection,
 } from '@/lib/connectionsData'
 import ConnectionDetail from '@/components/connections/ConnectionDetail'
 import AddConnectionPanel from '@/components/connections/AddConnectionPanel'
+import { supabase } from '@/lib/supabase'
+import { useTenantId } from '@/lib/auth'
 
 const PAGE_SIZE = 10
+
+// ─── Map DB row → FullConnection shape ───────────────────────────────────────
+function dbRowToFullConnection(row: Record<string, unknown>): FullConnection {
+  return {
+    id:                  String(row.id ?? ''),
+    product:             (row.product as FullConnection['product']) ?? 'Electricity',
+    client:              String(row.client ?? ''),
+    department:          String(row.department ?? ''),
+    name:                String(row.site_name ?? row.building_name ?? row.id ?? ''),
+    ean_code:            String(row.ean_code ?? ''),
+    address:             String(row.address ?? ''),
+    street:              String(row.address ?? ''),
+    house_number:        '',
+    addition:            '',
+    postcode:            '',
+    city:                '',
+    cost_center:         '',
+    status:              (row.status as FullConnection['status']) ?? 'Active',
+    supplier:            String(row.supplier ?? ''),
+    grid_operator:       String(row.grid_operator ?? ''),
+    measurement_company: '',
+    connection_type:     String(row.connection_type ?? ''),
+    building:            String(row.building_name ?? ''),
+    market_segment:      '',
+    monitoring:          '',
+    characteristic:      '',
+    usage_category:      String(row.usage_category ?? ''),
+    usage_type:          '',
+    tax_cluster:         '',
+    latitude:            Number(row.latitude ?? 24.4539),
+    longitude:           Number(row.longitude ?? 54.3773),
+    object_code:         '',
+    allocation_type:     '',
+    responsible:         '',
+    requested_by:        '',
+    contact_person:      '',
+    invoice_address:     '',
+    active_since:        String(row.active_since ?? ''),
+    contract:            String(row.contract ?? ''),
+    energy_label:        '',
+    market_seg_code:     '',
+    telemetry:           '',
+    connection_value:    row.capacity ? String(row.capacity) : '',
+    profile_category:    '',
+    connection_start:    '',
+    vacancy:             false,
+    active_on:           '',
+    supplier_contract:   '',
+    usage_low:           0,
+    usage_normal:        0,
+    target_usage:        0,
+    monitoring_type:     '',
+    monitoring_start:    '',
+    data_available:      '',
+    tax_cluster_label:   '',
+    rubricering:         '',
+    costs:               row.budget_annual_aed ? `AED ${Number(row.budget_annual_aed).toLocaleString()}` : '',
+    gps:                 row.latitude && row.longitude ? `${row.latitude}, ${row.longitude}` : '',
+    meter_number:        String(row.meter_number ?? ''),
+    meter_install:       '',
+    reading_normal:      0,
+    reading_low:         0,
+    reading_date:        '',
+    remarks:             String(row.remarks ?? ''),
+  }
+}
 
 // ─── Product colours ──────────────────────────────────────────────────────────
 const PRODUCT_COLOR: Record<string, string> = {
@@ -77,7 +143,6 @@ function project(lat: number, lon: number): [number, number] {
   return [x, y]
 }
 
-// ─── Connections Map view ─────────────────────────────────────────────────────
 function ConnectionsMap({
   connections,
   onSelect,
@@ -91,7 +156,6 @@ function ConnectionsMap({
   return (
     <div className="card p-0 overflow-hidden relative" style={{ background: '#061c22' }}>
       <svg width="100%" viewBox={`0 0 ${MW} ${MH}`} style={{ display: 'block' }}>
-        {/* ── Background gradient ── */}
         <defs>
           <radialGradient id="mapBg" cx="50%" cy="50%" r="70%">
             <stop offset="0%"   stopColor="#0d3d4a" stopOpacity="0.6" />
@@ -100,7 +164,6 @@ function ConnectionsMap({
         </defs>
         <rect width={MW} height={MH} fill="url(#mapBg)" />
 
-        {/* ── Grid ── */}
         {[0.2,0.4,0.6,0.8].map(f => (
           <line key={`v${f}`} x1={MW*f} y1={0} x2={MW*f} y2={MH}
             stroke="#1a4a55" strokeWidth="0.5" opacity="0.4" />
@@ -110,16 +173,13 @@ function ConnectionsMap({
             stroke="#1a4a55" strokeWidth="0.5" opacity="0.4" />
         ))}
 
-        {/* ── UAE simplified outline ── */}
         <path
           d="M90,320 L130,290 L170,265 L220,245 L270,228 L330,215 L390,205 L450,202 L510,204 L560,210 L600,222 L630,238 L648,260 L650,285 L640,308 L620,325 L595,338 L565,346 L535,350 L500,348 L470,350 L440,358 L410,368 L380,375 L350,378 L320,372 L290,362 L260,348 L230,335 L200,325 L170,318 L140,318 Z"
           fill="#0d3d4a" stroke="#1a6b7e" strokeWidth="1.5" opacity="0.55"
         />
-        {/* Abu Dhabi island rough */}
         <path d="M390,320 L420,310 L440,318 L435,338 L410,344 L392,336 Z"
           fill="#112f3a" stroke="#1a5a6e" strokeWidth="1" opacity="0.5" />
 
-        {/* ── Emirate labels ── */}
         {[
           { label: 'Abu Dhabi', lat: 24.2, lon: 54.3 },
           { label: 'Dubai',     lat: 25.0, lon: 55.15 },
@@ -135,7 +195,6 @@ function ConnectionsMap({
           )
         })}
 
-        {/* ── Connection dots ── */}
         {connections.map(c => {
           const [x, y] = project(c.latitude, c.longitude)
           const color = PRODUCT_COLOR[c.product] ?? '#6b7280'
@@ -143,22 +202,12 @@ function ConnectionsMap({
           return (
             <g key={c.id}
               className="cursor-pointer"
-              onMouseEnter={e => {
-                setHovered(c.id)
-                setTooltip({ x: e.clientX, y: e.clientY, conn: c })
-              }}
-              onMouseMove={e => {
-                if (tooltip?.conn.id === c.id) {
-                  setTooltip({ x: e.clientX, y: e.clientY, conn: c })
-                }
-              }}
+              onMouseEnter={e => { setHovered(c.id); setTooltip({ x: e.clientX, y: e.clientY, conn: c }) }}
+              onMouseMove={e => { if (tooltip?.conn.id === c.id) setTooltip({ x: e.clientX, y: e.clientY, conn: c }) }}
               onMouseLeave={() => { setHovered(null); setTooltip(null) }}
               onClick={() => onSelect(c)}
             >
-              {/* Pulse ring */}
-              {isHov && (
-                <circle cx={x} cy={y} r={16} fill={color} opacity={0.12} />
-              )}
+              {isHov && <circle cx={x} cy={y} r={16} fill={color} opacity={0.12} />}
               <circle cx={x} cy={y} r={isHov ? 10 : 7} fill={color} opacity={0.18} />
               <circle cx={x} cy={y} r={isHov ? 6 : 4.5} fill={color} opacity={0.5} />
               <circle cx={x} cy={y} r={isHov ? 3.5 : 2.5} fill={color} opacity={1} />
@@ -167,7 +216,6 @@ function ConnectionsMap({
           )
         })}
 
-        {/* ── Legend ── */}
         {(['Electricity','Gas','Water'] as const).map((p, i) => {
           const color = PRODUCT_COLOR[p]
           return (
@@ -179,7 +227,6 @@ function ConnectionsMap({
         })}
       </svg>
 
-      {/* ── Floating tooltip ── */}
       {tooltip && (
         <div
           className="fixed z-50 pointer-events-none bg-bg-secondary border border-border-subtle rounded-lg shadow-xl px-3 py-2.5 text-xs"
@@ -191,7 +238,7 @@ function ConnectionsMap({
             <span className="font-semibold text-white">{tooltip.conn.name}</span>
           </div>
           <div className="text-white/50 font-mono text-[10px]">{tooltip.conn.ean_code}</div>
-          <div className="text-white/40 text-[10px]">{tooltip.conn.address}, {tooltip.conn.city}</div>
+          <div className="text-white/40 text-[10px]">{tooltip.conn.address}</div>
           <div className="text-white/30 text-[10px] mt-0.5 italic">Click to open detail</div>
         </div>
       )}
@@ -214,31 +261,46 @@ const EMPTY: Filters = {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function Connections() {
+  const tenantId = useTenantId()
   const [filters, setFilters] = useState<Filters>(EMPTY)
   const [page, setPage]       = useState(1)
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
   const [selected, setSelected]   = useState<FullConnection | null>(null)
   const [adding,   setAdding]     = useState(false)
-  const [extraConns, setExtraConns] = useState<FullConnection[]>([])
+  const [dbConnections, setDbConnections] = useState<FullConnection[]>([])
+  const [loading, setLoading] = useState(true)
   const [searchParams] = useSearchParams()
 
-  const allConnections = useMemo(() => [...FULL_CONNECTIONS, ...extraConns], [extraConns])
+  // Load from Supabase
+  useEffect(() => {
+    setLoading(true)
+    supabase
+      .from('energy_connections')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .then(({ data, error }) => {
+        if (!error && data) {
+          setDbConnections(data.map(row => dbRowToFullConnection(row as Record<string, unknown>)))
+        }
+        setLoading(false)
+      })
+  }, [tenantId])
 
-  // Auto-open connection from ?conn=<id> (e.g. navigated from Buildings)
+  // Auto-open connection from ?conn=<id>
   useEffect(() => {
     const connId = searchParams.get('conn')
-    if (connId) {
-      const found = allConnections.find(c => c.id === connId)
+    if (connId && dbConnections.length > 0) {
+      const found = dbConnections.find(c => c.id === connId)
       if (found) setSelected(found)
     }
-  }, [searchParams, allConnections])
+  }, [searchParams, dbConnections])
 
   const set = (key: keyof Filters) => (val: string) => {
     setFilters(f => ({ ...f, [key]: val })); setPage(1)
   }
   const reset = () => { setFilters(EMPTY); setPage(1) }
 
-  const filtered = useMemo(() => allConnections.filter(c => {
+  const filtered = useMemo(() => dbConnections.filter(c => {
     if (filters.ean       && !c.ean_code.toLowerCase().includes(filters.ean.toLowerCase()) &&
                              !c.name.toLowerCase().includes(filters.ean.toLowerCase())) return false
     if (filters.product   && c.product         !== filters.product)       return false
@@ -256,7 +318,7 @@ export default function Connections() {
     if (filters.usage_cat && c.usage_category  !== filters.usage_cat)     return false
     if (filters.tax_cluster && c.tax_cluster   !== filters.tax_cluster)   return false
     return true
-  }), [filters])
+  }), [filters, dbConnections])
 
   const totalPages  = Math.ceil(filtered.length / PAGE_SIZE)
   const pageItems   = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -295,7 +357,6 @@ export default function Connections() {
           </div>
 
           <div className="px-4 py-3 flex-1">
-            {/* EAN search */}
             <div className="mb-4">
               <div className="text-[11px] text-white/40 mb-1">Meter number / EAN</div>
               <input type="text" placeholder="Search meter or EAN..."
@@ -324,11 +385,11 @@ export default function Connections() {
             </FilterSection>
 
             <FilterSection title="Meters">
-              <FilterSelect label="Monitoring / Meter type" value={filters.monitoring}   options={MONITORINGS}    onChange={set('monitoring')} />
+              <FilterSelect label="Monitoring / Meter type" value={filters.monitoring} options={MONITORINGS} onChange={set('monitoring')} />
             </FilterSection>
 
             <FilterSection title="Financial">
-              <FilterSelect label="Tax cluster"         value={filters.tax_cluster}  options={TAX_CLUSTERS}   onChange={set('tax_cluster')} />
+              <FilterSelect label="Tax cluster" value={filters.tax_cluster} options={TAX_CLUSTERS} onChange={set('tax_cluster')} />
             </FilterSection>
           </div>
         </aside>
@@ -337,11 +398,9 @@ export default function Connections() {
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto px-6 py-5">
 
-            {/* Title row + view toggle */}
             <div className="flex items-center justify-between mb-4">
               <h1 className="text-2xl font-light text-white/80 italic">Connections</h1>
 
-              {/* List / Map toggle */}
               <div className="flex items-center bg-bg-card border border-border-subtle rounded-lg p-0.5 gap-0.5">
                 {([
                   { id: 'list', icon: List,    label: 'List' },
@@ -360,7 +419,6 @@ export default function Connections() {
               </div>
             </div>
 
-            {/* Active filter chips */}
             {activeFilters.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-3">
                 {activeFilters.map(([key, val]) => (
@@ -369,10 +427,13 @@ export default function Connections() {
               </div>
             )}
 
+            {loading ? (
+              <div className="card text-center text-white/30 py-12">Loading connections…</div>
+            ) : (<>
+
             {/* ── MAP VIEW ─────────────────────────────────────────────── */}
             {viewMode === 'map' && (
               <div>
-                {/* Stats row above map */}
                 <div className="flex gap-3 mb-3 flex-wrap">
                   {(['Electricity','Gas','Water'] as const).map(p => {
                     const count = filtered.filter(c => c.product === p).length
@@ -389,7 +450,6 @@ export default function Connections() {
                     <span>{filtered.length} connections shown · click to open detail</span>
                   </div>
                 </div>
-
                 <ConnectionsMap connections={filtered} onSelect={setSelected} />
               </div>
             )}
@@ -397,7 +457,6 @@ export default function Connections() {
             {/* ── LIST VIEW ────────────────────────────────────────────── */}
             {viewMode === 'list' && (
               <>
-                {/* Pagination top + download */}
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1">
@@ -435,12 +494,11 @@ export default function Connections() {
                   </button>
                 </div>
 
-                {/* Table */}
                 <div className="card p-0 overflow-hidden">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-border-subtle">
-                        {['Product','Client','Department','Connection name','EAN code','Address','Postcode','City','Cost center','Status'].map(h => (
+                        {['Product','Supplier','Connection name','EAN code','Address','Connection type','Meter No.','Status'].map(h => (
                           <th key={h} className="tbl-th whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -448,7 +506,7 @@ export default function Connections() {
                     <tbody>
                       {pageItems.length === 0 && (
                         <tr>
-                          <td colSpan={10} className="text-center py-16 text-white/30">
+                          <td colSpan={8} className="text-center py-16 text-white/30">
                             No connections match the active filters
                           </td>
                         </tr>
@@ -470,14 +528,12 @@ export default function Connections() {
                               <span className="text-white/80">{c.product}</span>
                             </div>
                           </td>
-                          <td className="tbl-td text-white/70 max-w-[120px] truncate">{c.client}</td>
-                          <td className="tbl-td text-white/60 max-w-[100px] truncate">{c.department}</td>
-                          <td className="tbl-td text-white/80 font-medium max-w-[160px] truncate" title={c.name}>{c.name}</td>
-                          <td className="tbl-td font-mono text-white/50 whitespace-nowrap">{c.ean_code}</td>
-                          <td className="tbl-td text-white/60 max-w-[140px] truncate" title={c.address}>{c.address}</td>
-                          <td className="tbl-td text-white/50 whitespace-nowrap">{c.postcode}</td>
-                          <td className="tbl-td text-white/60 whitespace-nowrap">{c.city}</td>
-                          <td className="tbl-td font-mono text-white/40 whitespace-nowrap text-[10px]">{c.cost_center}</td>
+                          <td className="tbl-td text-white/60 max-w-[120px] truncate">{c.supplier || '—'}</td>
+                          <td className="tbl-td text-white/80 font-medium max-w-[180px] truncate" title={c.name}>{c.name}</td>
+                          <td className="tbl-td font-mono text-white/50 whitespace-nowrap">{c.ean_code || '—'}</td>
+                          <td className="tbl-td text-white/60 max-w-[160px] truncate" title={c.address}>{c.address || '—'}</td>
+                          <td className="tbl-td text-white/50 whitespace-nowrap">{c.connection_type || '—'}</td>
+                          <td className="tbl-td font-mono text-white/40 whitespace-nowrap text-[10px]">{c.meter_number || '—'}</td>
                           <td className="tbl-td">
                             <span className={clsx(
                               'inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full',
@@ -499,7 +555,6 @@ export default function Connections() {
                   </table>
                 </div>
 
-                {/* Pagination bottom */}
                 {totalPages > 1 && (
                   <div className="flex items-center justify-center gap-1 mt-4">
                     {pageNumbers.map((p, i) =>
@@ -514,20 +569,23 @@ export default function Connections() {
                 )}
               </>
             )}
+
+            </>)}
           </div>
         </div>
       </div>
 
-      {/* ── Connection detail slide-over ───────────────────────────────────── */}
       {selected && (
         <ConnectionDetail conn={selected} onClose={() => setSelected(null)} />
       )}
 
-      {/* ── Add connection panel ───────────────────────────────────────────── */}
       {adding && (
         <AddConnectionPanel
           onClose={() => setAdding(false)}
-          onSave={conn => { setExtraConns(prev => [...prev, conn]); setAdding(false) }}
+          onSave={conn => {
+            setDbConnections(prev => [...prev, conn])
+            setAdding(false)
+          }}
         />
       )}
     </div>

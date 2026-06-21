@@ -21,6 +21,8 @@ export function UAEMap({ sites }: MapProps) {
 
     // Dynamically import Leaflet to avoid SSR issues
     import('leaflet').then(L => {
+      // Guard against HMR re-init
+      if ((containerRef.current as any)._leaflet_id) return
       const map = L.map(containerRef.current!, {
         center: [24.8, 54.5],
         zoom: 7,

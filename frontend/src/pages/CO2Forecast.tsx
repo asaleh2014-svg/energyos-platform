@@ -1,63 +1,132 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
-import { HISTORIC_EMISSIONS, EMISSION_SCENARIOS } from '@/lib/mockData'
-import { useAppStore } from '@/lib/store'
+import { useTenantId } from '@/lib/auth'
+import { fetchConsumption } from '@/lib/dbQueries'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, ReferenceLine, Area, AreaChart,
 } from 'recharts'
 import clsx from 'clsx'
-import { TrendingDown, Leaf, Zap, Target, AlertTriangle } from 'lucide-react'
+import { TrendingDown, Leaf, Zap, Target, AlertTriangle, Loader2 } from 'lucide-react'
 
 const TT = { background:'#0d2b35', border:'1px solid #1a5568', borderRadius:8, fontSize:11 }
 
-// Key decarbonisation milestones
 const MILESTONES = [
-  { year: 2027, label: 'DEWA 50% clean energy target (Dubai 2030 plan)',           scenario: 'moderate' },
-  { year: 2030, label: 'UAE Net Zero 2050 roadmap checkpoint — 30% reduction',      scenario: 'moderate' },
-  { year: 2035, label: 'Dubai Clean Energy Strategy — 75% renewables',              scenario: 'ambitious' },
-  { year: 2050, label: 'UAE Net Zero 2050',                                          scenario: 'ambitious' },
+  { year: 2027, label: 'DEWA 50% clean energy target (Dubai 2030 plan)',      scenario: 'moderate' },
+  { year: 2030, label: 'UAE Net Zero 2050 roadmap checkpoint — 30% reduction', scenario: 'moderate' },
+  { year: 2035, label: 'Dubai Clean Energy Strategy — 75% renewables',         scenario: 'ambitious' },
+  { year: 2050, label: 'UAE Net Zero 2050',                                    scenario: 'ambitious' },
 ]
 
 const ACTIONS = [
-  { label: 'Install rooftop PV (Masdar City Hub)',    impact: '-18 tCO₂/yr', cost: 'AED 380k', payback: '4.2 yr', icon: Zap,     color: '#10b981' },
-  { label: 'Switch DIFC tower to DEWA green tariff',  impact: '-28 tCO₂/yr', cost: 'AED 22k/yr',payback: 'N/A',  icon: Leaf,    color: '#3b82f6' },
-  { label: 'LED lighting retrofit — BBY Main',        impact: '-6 tCO₂/yr',  cost: 'AED 48k',   payback: '2.1 yr',icon: Zap,    color: '#f59e0b' },
-  { label: 'Energy storage (BESS) — Sharjah site',   impact: '-12 tCO₂/yr', cost: 'AED 620k',  payback: '6.8 yr',icon: Target, color: '#8b5cf6' },
+  { label: 'Install rooftop PV (top site)',              impact: '-18 tCO₂/yr', cost: 'AED 380k',  payback: '4.2 yr', icon: Zap,     color: '#10b981' },
+  { label: 'Switch electricity to green tariff',          impact: '-28 tCO₂/yr', cost: 'AED 22k/yr',payback: 'N/A',   icon: Leaf,    color: '#3b82f6' },
+  { label: 'LED lighting retrofit',                       impact: '-6 tCO₂/yr',  cost: 'AED 48k',   payback: '2.1 yr', icon: Zap,    color: '#f59e0b' },
+  { label: 'Energy storage (BESS)',                       impact: '-12 tCO₂/yr', cost: 'AED 620k',  payback: '6.8 yr', icon: Target, color: '#8b5cf6' },
 ]
 
+interface HistoricPoint {
+  year: string
+  historic: number
+  elec: number
+  gas: number
+}
+
+interface ForecastPoint {
+  year: string
+  historic: number | null
+  elec: number | null
+  gas: number | null
+  bau: number | null
+  moderate: number | null
+  ambitious: number | null
+  target: number
+}
+
 export default function CO2Forecast() {
-  const { siteMixes } = useAppStore()
+  const tenantId = useTenantId()
   const [scenario, setScenario] = useState<'bau' | 'moderate' | 'ambitious'>('moderate')
+  const [loading, setLoading]   = useState(true)
+  const [forecastData, setForecastData] = useState<ForecastPoint[]>([])
+  const [historicPoints, setHistoricPoints] = useState<HistoricPoint[]>([])
+  const [baseline, setBaseline] = useState(0)
 
-  // Combine historic + forecast into a single series
-  const historicYears = HISTORIC_EMISSIONS.map(e => e.year)
-  const forecastData = [
-    ...HISTORIC_EMISSIONS.map(e => ({
-      year: String(e.year),
-      historic: e.total,
-      elec: e.elec,
-      gas: e.gas,
-      bau: null as number | null,
-      moderate: null as number | null,
-      ambitious: null as number | null,
-      target: 0,
-    })),
-    ...EMISSION_SCENARIOS.slice(1).map(s => ({
-      year: String(s.year),
-      historic: null as number | null,
-      elec: null as number | null,
-      gas: null as number | null,
-      bau: s.bau,
-      moderate: s.moderate,
-      ambitious: s.ambitious,
-      target: s.target,
-    })),
-  ]
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      const records = await fetchConsumption(tenantId)
 
-  const current2025 = HISTORIC_EMISSIONS[HISTORIC_EMISSIONS.length - 1].total
-  const reduction2020 = HISTORIC_EMISSIONS[0].total - current2025
-  const pctReduction = ((reduction2020 / HISTORIC_EMISSIONS[0].total) * 100).toFixed(1)
+      // Aggregate CO2 by year
+      const yearElec: Record<string, number> = {}
+      const yearGas:  Record<string, number> = {}
+      for (const r of records) {
+        const yr = r.period_start?.slice(0, 4)
+        if (!yr) continue
+        if (r.unit === 'kWh') yearElec[yr] = (yearElec[yr] ?? 0) + Number(r.consumption)
+        else                   yearGas[yr]  = (yearGas[yr]  ?? 0) + Number(r.consumption)
+      }
+
+      const years = [...new Set([...Object.keys(yearElec), ...Object.keys(yearGas)])].sort()
+
+      if (years.length === 0) {
+        setLoading(false)
+        return
+      }
+
+      const hPoints: HistoricPoint[] = years.map(yr => {
+        const elec = yearElec[yr] ?? 0
+        const gas  = yearGas[yr]  ?? 0
+        const elecTco2 = Math.round((elec * 0.45) / 1000 * 10) / 10
+        const gasTco2  = Math.round((gas  * 2.04) / 1000 * 10) / 10
+        return { year: yr, historic: elecTco2 + gasTco2, elec: elecTco2, gas: gasTco2 }
+      })
+      setHistoricPoints(hPoints)
+
+      const baselineVal = hPoints[hPoints.length - 1].historic
+      setBaseline(baselineVal)
+
+      // Build forecast: 2026–2050 from most recent year
+      const baseYear = Number(years[years.length - 1])
+      const currentYear = new Date().getFullYear()
+      const startForecastYear = Math.max(baseYear + 1, currentYear)
+
+      const forecastYears = Array.from(
+        { length: 2051 - startForecastYear },
+        (_, i) => startForecastYear + i,
+      )
+
+      // Scenario reduction curves (annual % from baseline)
+      function bauVal(yr: number)       { return Math.max(0, baselineVal * (1 + 0.01 * (yr - baseYear))) }
+      function moderateVal(yr: number)  { return Math.max(0, baselineVal * Math.pow(1 - 0.04, yr - baseYear)) }
+      function ambitiousVal(yr: number) { return Math.max(0, baselineVal * Math.pow(1 - 0.07, yr - baseYear)) }
+      // target line: −50% by 2030, net zero 2050
+      function targetVal(yr: number) {
+        if (yr >= 2050) return 0
+        const progress = (yr - baseYear) / (2050 - baseYear)
+        return Math.max(0, baselineVal * (1 - progress))
+      }
+
+      const histRows: ForecastPoint[] = hPoints.map(h => ({
+        year: h.year, historic: h.historic, elec: h.elec, gas: h.gas,
+        bau: null, moderate: null, ambitious: null, target: 0,
+      }))
+
+      const fcastRows: ForecastPoint[] = forecastYears.map(yr => ({
+        year:      String(yr),
+        historic:  null,
+        elec:      null,
+        gas:       null,
+        bau:       Math.round(bauVal(yr) * 10) / 10,
+        moderate:  Math.round(moderateVal(yr) * 10) / 10,
+        ambitious: Math.round(ambitiousVal(yr) * 10) / 10,
+        target:    Math.round(targetVal(yr) * 10) / 10,
+      }))
+
+      setForecastData([...histRows, ...fcastRows])
+      setLoading(false)
+    }
+    load()
+  }, [tenantId])
 
   const scenarioLabels: Record<string, string> = {
     bau: 'Business as Usual',
@@ -68,8 +137,37 @@ export default function CO2Forecast() {
     bau: '#ef4444', moderate: '#f59e0b', ambitious: '#10b981',
   }
 
-  const netZeroYear = scenario === 'ambitious' ? 2050 : scenario === 'moderate' ? 2050 : '—'
-  const projected2030 = EMISSION_SCENARIOS.find(s => s.year === 2030)?.[scenario] ?? 0
+  const currentTotal   = historicPoints.length > 0 ? historicPoints[historicPoints.length - 1].historic : 0
+  const firstTotal     = historicPoints.length > 0 ? historicPoints[0].historic : 0
+  const reduction      = Math.round((firstTotal - currentTotal) * 10) / 10
+  const pctReduction   = firstTotal > 0 ? ((reduction / firstTotal) * 100).toFixed(1) : '0'
+  const projected2030  = forecastData.find(d => d.year === '2030')?.[scenario] ?? 0
+  const netZeroYear    = scenario === 'ambitious' ? 2050 : scenario === 'moderate' ? 2050 : '—'
+
+  const maxDomain = Math.ceil((Math.max(...historicPoints.map(h => h.historic), baseline) * 1.15) / 10) * 10
+
+  if (loading) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <Topbar title="CO₂ Forecast" subtitle="Path to net zero emissions" />
+        <div className="flex-1 flex items-center justify-center">
+          <Loader2 size={24} className="animate-spin text-white/30" />
+        </div>
+      </div>
+    )
+  }
+
+  if (forecastData.length === 0) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <Topbar title="CO₂ Forecast" subtitle="Path to net zero emissions" />
+        <div className="flex-1 flex items-center justify-center flex-col gap-3 text-white/40">
+          <div className="text-4xl">🌿</div>
+          <p className="text-sm">No consumption data yet — import records via Analytics to see CO₂ forecasts.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -79,19 +177,20 @@ export default function CO2Forecast() {
         {/* KPI banner */}
         <div className="grid grid-cols-4 gap-4 mb-6">
           <div className="card">
-            <div className="label mb-1">Current Emissions (2025)</div>
-            <div className="text-2xl font-semibold text-white">{current2025} <span className="text-sm font-normal text-white/40">tCO₂</span></div>
-            <div className="text-xs text-success-light mt-1">↓ {pctReduction}% since 2020</div>
+            <div className="label mb-1">Current Emissions</div>
+            <div className="text-2xl font-semibold text-white">{currentTotal.toFixed(1)} <span className="text-sm font-normal text-white/40">tCO₂</span></div>
+            <div className="text-xs text-white/40 mt-1">Most recent year in data</div>
           </div>
           <div className="card">
-            <div className="label mb-1">Reduction since 2020</div>
-            <div className="text-2xl font-semibold text-success-light">{reduction2020} <span className="text-sm font-normal text-white/40">tCO₂</span></div>
-            <div className="text-xs text-white/40 mt-1">Grid mix improvement (DEWA/ADC)</div>
+            <div className="label mb-1">Reduction since baseline</div>
+            <div className="text-2xl font-semibold text-success-light">{reduction.toFixed(1)} <span className="text-sm font-normal text-white/40">tCO₂</span></div>
+            <div className="text-xs text-white/40 mt-1">{pctReduction}% vs first year</div>
           </div>
           <div className="card">
             <div className="label mb-1">Projected 2030</div>
-            <div className="text-2xl font-semibold text-white" style={{ color: scenarioColors[scenario] }}>
-              {projected2030} <span className="text-sm font-normal text-white/40">tCO₂</span>
+            <div className="text-2xl font-semibold" style={{ color: scenarioColors[scenario] }}>
+              {projected2030 > 0 ? `${projected2030} ` : '—'}
+              <span className="text-sm font-normal text-white/40">tCO₂</span>
             </div>
             <div className="text-xs text-white/40 mt-1">{scenarioLabels[scenario]}</div>
           </div>
@@ -125,7 +224,7 @@ export default function CO2Forecast() {
             <div>
               <h2 className="section-title">Emissions Trajectory — Path to Net Zero (tCO₂)</h2>
               <p className="text-xs text-white/30 mt-0.5">
-                Historic 2020–2025 · Forecast 2026–2050 · Selected: <span style={{ color: scenarioColors[scenario] }}>{scenarioLabels[scenario]}</span>
+                Historic {historicPoints[0]?.year}–{historicPoints[historicPoints.length-1]?.year} · Forecast to 2050 · Selected: <span style={{ color: scenarioColors[scenario] }}>{scenarioLabels[scenario]}</span>
               </p>
             </div>
             <div className="flex items-center gap-1.5 text-xs text-success-light bg-success/10 border border-success/20 rounded-lg px-3 py-1.5">
@@ -146,33 +245,30 @@ export default function CO2Forecast() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-              <XAxis dataKey="year" tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} />
+              <XAxis dataKey="year" tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false}
+                interval={4} />
               <YAxis tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false}
-                tickFormatter={v => `${v}t`} domain={[0, 430]} />
+                tickFormatter={v => `${v}t`} domain={[0, maxDomain]} />
               <Tooltip contentStyle={TT}
                 formatter={(v: number, n: string) => [v != null ? `${v} tCO₂` : '—', n]}
                 labelStyle={{ color:'#e8eaf2', fontWeight:600 }} />
               <Legend wrapperStyle={{ fontSize:10 }} />
 
-              {/* Historic fill */}
               <Area dataKey="historic" name="Historic" stroke="#3b82f6" fill="url(#histGrad)"
                 strokeWidth={2} dot={false} connectNulls={false} />
 
-              {/* BAU dashed */}
               {scenario !== 'bau' && (
                 <Line dataKey="bau" name="BAU (no action)" stroke="#ef4444"
                   strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls={false} />
               )}
 
-              {/* Selected scenario */}
               <Area dataKey={scenario} name={scenarioLabels[scenario]}
                 stroke={scenarioColors[scenario]} fill="url(#scnGrad)"
                 strokeWidth={2.5} dot={false} connectNulls={false} />
 
-              {/* Net zero reference */}
-              <ReferenceLine y={0} stroke="#10b981" strokeDasharray="4 4" strokeWidth={1.5} label={{ value:'Net Zero', position:'insideTopLeft', fill:'#10b981', fontSize:10 }} />
+              <ReferenceLine y={0} stroke="#10b981" strokeDasharray="4 4" strokeWidth={1.5}
+                label={{ value:'Net Zero', position:'insideTopLeft', fill:'#10b981', fontSize:10 }} />
 
-              {/* Milestone markers */}
               {MILESTONES.filter(m => m.scenario === scenario || m.scenario === 'moderate').map(m => (
                 <ReferenceLine key={m.year} x={String(m.year)} stroke="#ffffff15" strokeDasharray="3 3" />
               ))}
@@ -184,10 +280,9 @@ export default function CO2Forecast() {
         <div className="grid grid-cols-2 gap-4 mb-5">
           <div className="card">
             <h2 className="section-title mb-1">Historic — Electricity vs Gas (tCO₂)</h2>
-            <p className="text-xs text-white/30 mb-3">Electricity emissions are decreasing faster due to grid decarbonisation</p>
+            <p className="text-xs text-white/30 mb-3">Electricity uses 0.45 kgCO₂/kWh · Gas uses 2.04 kgCO₂/m³</p>
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={HISTORIC_EMISSIONS.map(e => ({ ...e, year: String(e.year) }))}
-                margin={{ top:0, right:0, left:-10, bottom:0 }}>
+              <BarChart data={historicPoints} margin={{ top:0, right:0, left:-10, bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
                 <XAxis dataKey="year" tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} tickFormatter={v => `${v}t`} />
@@ -199,7 +294,6 @@ export default function CO2Forecast() {
             </ResponsiveContainer>
           </div>
 
-          {/* Milestones */}
           <div className="card">
             <h2 className="section-title mb-3">UAE Decarbonisation Milestones</h2>
             <div className="space-y-3">
@@ -251,7 +345,7 @@ export default function CO2Forecast() {
           <div className="mt-4 p-3 rounded-lg border border-warning/20 bg-warning/5 flex items-start gap-2">
             <AlertTriangle size={13} className="text-warning mt-0.5 flex-shrink-0" />
             <p className="text-xs text-white/50">
-              Implementing all 4 actions would reduce portfolio emissions by <strong className="text-white/70">~64 tCO₂/yr</strong> (20% reduction from 2025 baseline),
+              Implementing all 4 actions would reduce portfolio emissions by <strong className="text-white/70">~64 tCO₂/yr</strong>,
               putting the portfolio ahead of the moderate scenario and on track for UAE 2030 targets.
             </p>
           </div>

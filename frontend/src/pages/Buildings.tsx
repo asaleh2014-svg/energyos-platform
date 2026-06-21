@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
 import {
@@ -11,19 +11,72 @@ import {
   ResponsiveContainer, Legend,
 } from 'recharts'
 import {
-  mockBuildingsForSite, buildingMonthly, buildingConnections,
-  LABEL_COLORS, ENERGY_LABELS, type MockBuilding, type EnergyLabel,
+  LABEL_COLORS, ENERGY_LABELS, type EnergyLabel,
 } from '@/lib/buildingMocks'
 import { PeriodSelector, DEFAULT_PERIOD, type Period } from '@/components/PeriodSelector'
+import { supabase } from '@/lib/supabase'
+import { useTenantId } from '@/lib/auth'
 
-const MOCK_SITE_IDS = [
-  'site-abu-dhabi-1', 'site-abu-dhabi-2', 'site-abu-dhabi-3',
-  'site-dubai-1',     'site-dubai-2',     'site-dubai-3',
-  'site-sharjah-1',   'site-sharjah-2',
-]
+// ─── DB row types ─────────────────────────────────────────────────────────────
+interface DBBuilding {
+  id: string
+  tenant_id: string
+  site_id: string
+  name: string
+  address: string | null
+  area_m2: number | null
+  floors: number | null
+  year_built: number | null
+  energy_label: string | null
+  breeam_rating: string | null
+  leed_rating: string | null
+  occupancy_pct: number | null
+  status: string | null
+  building_type: string | null
+  sites: {
+    name: string
+    cities: { name: string; countries: { name: string; code: string } | null } | null
+  } | null
+}
+
+interface DBConnection {
+  id: string
+  tenant_id: string
+  site_id: string | null
+  site_name: string | null
+  ean_code: string | null
+  connection_type: string | null
+  capacity: string | null
+  status: string | null
+  supplier: string | null
+  grid_operator: string | null
+  building_name: string | null
+  address: string | null
+  latitude: number | null
+  longitude: number | null
+  meter_number: string | null
+  active_since: string | null
+  contract: string | null
+  budget_annual_aed: number | null
+  tariff_rate: number | null
+  product: string | null
+  department: string | null
+  usage_category: string | null
+  remarks: string | null
+}
+
+interface ConsumptionRecord {
+  id: string
+  connection_id: string
+  period_start: string
+  period_end: string
+  consumption: number
+  unit: string | null
+  cost: number | null
+  currency: string | null
+}
 
 // ─── UAE sector EUI benchmarks (kWh/m²/year) ──────────────────────────────────
-// Source: DEWA / ADDC energy efficiency guidelines, Dubai Green Building Regulations
 const UAE_BENCHMARKS: Record<string, { good: number; typical: number; poor: number; label: string }> = {
   'Office':      { good: 120, typical: 200, poor: 300, label: 'Office' },
   'Retail':      { good: 180, typical: 280, poor: 400, label: 'Retail' },
@@ -36,9 +89,9 @@ const UAE_BENCHMARKS: Record<string, { good: number; typical: number; poor: numb
 const DEFAULT_BENCHMARK = { good: 150, typical: 240, poor: 360, label: 'General' }
 
 function euiColor(eui: number, bm: typeof DEFAULT_BENCHMARK) {
-  if (eui <= bm.good)    return '#10b981' // green
-  if (eui <= bm.typical) return '#f59e0b' // amber
-  return '#ef4444'                         // red
+  if (eui <= bm.good)    return '#10b981'
+  if (eui <= bm.typical) return '#f59e0b'
+  return '#ef4444'
 }
 
 function euiRating(eui: number, bm: typeof DEFAULT_BENCHMARK): string {
@@ -48,12 +101,21 @@ function euiRating(eui: number, bm: typeof DEFAULT_BENCHMARK): string {
 }
 
 // ─── Benchmarking view ────────────────────────────────────────────────────────
-function BenchmarkingView({ buildings }: { buildings: MockBuilding[] }) {
+interface BenchmarkBuilding {
+  id: string
+  name: string
+  area_m2: number
+  elec_kwh_year: number
+  energy_label: EnergyLabel
+}
+
+function BenchmarkingView({ buildings }: { buildings: BenchmarkBuilding[] }) {
   const [sector, setSector] = useState('Office')
   const bm = UAE_BENCHMARKS[sector] ?? DEFAULT_BENCHMARK
-  const maxEUI = Math.max(bm.poor * 1.1, ...buildings.map(b => b.elec_kwh_year / b.area_m2))
+  const maxEUI = Math.max(bm.poor * 1.1, ...buildings.map(b => b.area_m2 > 0 ? b.elec_kwh_year / b.area_m2 : 0))
 
   const sorted = [...buildings]
+    .filter(b => b.area_m2 > 0)
     .map(b => ({ ...b, eui: +(b.elec_kwh_year / b.area_m2).toFixed(1) }))
     .sort((a, b) => a.eui - b.eui)
 
@@ -62,7 +124,6 @@ function BenchmarkingView({ buildings }: { buildings: MockBuilding[] }) {
 
   return (
     <div className="space-y-5">
-      {/* Sector picker + legend */}
       <div className="flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-xs text-white/40 uppercase tracking-widest">Building type</span>
@@ -78,7 +139,6 @@ function BenchmarkingView({ buildings }: { buildings: MockBuilding[] }) {
         </div>
       </div>
 
-      {/* KPI cards */}
       <div className="grid grid-cols-4 gap-4">
         {[
           { label: 'Buildings', value: String(sorted.length), sub: 'in portfolio' },
@@ -94,13 +154,10 @@ function BenchmarkingView({ buildings }: { buildings: MockBuilding[] }) {
         ))}
       </div>
 
-      {/* Benchmark bars */}
       <div className="card p-4 space-y-3">
         <div className="text-xs font-semibold text-white/60 uppercase tracking-widest mb-3">
           EUI Ranking — {sector} buildings · UAE benchmarks
         </div>
-
-        {/* Reference lines */}
         <div className="relative h-4 mb-1">
           {[
             { pct: (bm.good / maxEUI) * 100, label: `Good ≤${bm.good}`, color: '#10b981' },
@@ -138,7 +195,6 @@ function BenchmarkingView({ buildings }: { buildings: MockBuilding[] }) {
         })}
       </div>
 
-      {/* Detail table */}
       <div className="card p-0 overflow-hidden">
         <table className="w-full text-xs">
           <thead>
@@ -184,11 +240,12 @@ function BenchmarkingView({ buildings }: { buildings: MockBuilding[] }) {
   )
 }
 
-function LabelBadge({ label }: { label: EnergyLabel }) {
+function LabelBadge({ label }: { label: EnergyLabel | string | null }) {
+  const l = (label ?? 'C') as EnergyLabel
   return (
     <span className="inline-flex items-center justify-center w-9 h-7 rounded font-bold text-xs text-white"
-      style={{ background: LABEL_COLORS[label] }}>
-      {label}
+      style={{ background: LABEL_COLORS[l] ?? '#6b7280' }}>
+      {l}
     </span>
   )
 }
@@ -200,9 +257,20 @@ const PRODUCT_ICON: Record<string, React.ElementType> = {
   Electricity: Zap, Gas: Flame, Water: Droplets,
 }
 
-function BuildingConnectionsSection({ building }: { building: MockBuilding }) {
+// ─── Building connections section (DB-driven) ─────────────────────────────────
+function BuildingConnectionsSection({ siteId }: { siteId: string }) {
   const navigate = useNavigate()
-  const conns = useMemo(() => buildingConnections(building), [building.id])
+  const tenantId = useTenantId()
+  const [conns, setConns] = useState<DBConnection[]>([])
+
+  useEffect(() => {
+    supabase
+      .from('energy_connections')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('site_id', siteId)
+      .then(({ data }) => setConns(data ?? []))
+  }, [siteId, tenantId])
 
   if (conns.length === 0) return null
 
@@ -217,8 +285,9 @@ function BuildingConnectionsSection({ building }: { building: MockBuilding }) {
       </div>
       <div className="space-y-2">
         {conns.map(c => {
-          const color = PRODUCT_COLOR[c.product] ?? '#6b7280'
-          const Icon  = PRODUCT_ICON[c.product] ?? Zap
+          const product = c.product ?? 'Electricity'
+          const color = PRODUCT_COLOR[product] ?? '#6b7280'
+          const Icon  = PRODUCT_ICON[product] ?? Zap
           return (
             <button
               key={c.id}
@@ -231,22 +300,17 @@ function BuildingConnectionsSection({ building }: { building: MockBuilding }) {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-white/80 font-medium group-hover:text-accent-hover transition-colors truncate">
-                  {c.name}
+                  {c.site_name ?? c.address ?? c.id}
                 </div>
                 <div className="flex items-center gap-2 mt-0.5 text-[11px] text-white/35">
                   <span className="font-mono">{c.ean_code}</span>
-                  <span>·</span>
-                  <span>{c.connection_type}</span>
-                  <span>·</span>
-                  <span>{c.meter_number}</span>
+                  {c.connection_type && <><span>·</span><span>{c.connection_type}</span></>}
+                  {c.meter_number && <><span>·</span><span>{c.meter_number}</span></>}
                 </div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <span className={`status-${c.status.toLowerCase()}`}>{c.status}</span>
-                <div className="flex items-center gap-1 text-[11px] text-white/30">
-                  <Activity size={10} />
-                  <span>{((c.usage_normal + c.usage_low) / 1000).toFixed(0)}K kWh/yr</span>
-                </div>
+                <span className={`status-${(c.status ?? 'inactive').toLowerCase()}`}>{c.status ?? 'Unknown'}</span>
+                <Activity size={10} className="text-white/30" />
                 <ChevronRight size={13} className="text-white/20 group-hover:text-accent transition-colors" />
               </div>
             </button>
@@ -257,14 +321,92 @@ function BuildingConnectionsSection({ building }: { building: MockBuilding }) {
   )
 }
 
-function BuildingDetail({ building }: { building: MockBuilding }) {
+// ─── Monthly chart from real consumption records ───────────────────────────────
+function buildMonthlyFromRecords(records: ConsumptionRecord[], period: Period) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const now = new Date()
+
+  if (period.granularity === 'day') {
+    const byDay: Record<string, { elec: number; gas: number }> = {}
+    for (const r of records) {
+      const d = r.period_start.slice(0, 10)
+      if (!byDay[d]) byDay[d] = { elec: 0, gas: 0 }
+      // We don't distinguish elec vs gas here (no unit on connection yet), use consumption
+      byDay[d].elec += r.consumption
+    }
+    const cur = new Date(period.from)
+    const end = new Date(period.to)
+    const rows: { month: string; elec: number; gas: number }[] = []
+    while (cur <= end) {
+      const key = cur.toISOString().slice(0, 10)
+      const day = byDay[key] ?? { elec: 0, gas: 0 }
+      rows.push({ month: `${cur.getDate()} ${MONTHS[cur.getMonth()]}`, elec: day.elec, gas: day.gas })
+      cur.setDate(cur.getDate() + 1)
+    }
+    return rows
+  }
+
+  // Monthly grouping
+  const byMonth: Record<string, { elec: number; gas: number }> = {}
+  for (const r of records) {
+    const d = new Date(r.period_start)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    if (!byMonth[key]) byMonth[key] = { elec: 0, gas: 0 }
+    byMonth[key].elec += r.consumption
+  }
+
+  const rows: { month: string; elec: number; gas: number }[] = []
+  const cur = new Date(period.from.getFullYear(), period.from.getMonth(), 1)
+  const end = new Date(period.to.getFullYear(), period.to.getMonth(), 1)
+  while (cur <= end) {
+    const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`
+    const label = `${MONTHS[cur.getMonth()]}${cur.getFullYear() !== now.getFullYear() ? ` ${cur.getFullYear()}` : ''}`
+    rows.push({ month: label, elec: byMonth[key]?.elec ?? 0, gas: byMonth[key]?.gas ?? 0 })
+    cur.setMonth(cur.getMonth() + 1)
+  }
+  return rows
+}
+
+// ─── Building detail ──────────────────────────────────────────────────────────
+function BuildingDetail({ building }: { building: DBBuilding }) {
   const navigate = useNavigate()
+  const tenantId = useTenantId()
   const [period, setPeriod]     = useState<Period>(DEFAULT_PERIOD)
   const [showTable, setShowTable] = useState(false)
-  const monthly  = useMemo(() => buildingMonthly(building, period), [building, period])
-  const eff      = (building.elec_kwh_year / building.area_m2).toFixed(1)
-  const co2      = (building.elec_kwh_year * 0.233 / 1000).toFixed(1)
+  const [connections, setConnections] = useState<DBConnection[]>([])
+  const [records, setRecords]   = useState<ConsumptionRecord[]>([])
+
+  const area   = building.area_m2 ?? 1
   const TT = { background: '#0d2b35', border: '1px solid #1a5568', borderRadius: 8, fontSize: 11 }
+
+  // Fetch connections for this site
+  useEffect(() => {
+    supabase
+      .from('energy_connections')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('site_id', building.site_id)
+      .then(({ data }) => setConnections(data ?? []))
+  }, [building.site_id, tenantId])
+
+  // Fetch consumption records for those connections
+  useEffect(() => {
+    if (connections.length === 0) return
+    const ids = connections.map(c => c.id)
+    supabase
+      .from('consumption_records')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .in('connection_id', ids)
+      .gte('period_start', period.from.toISOString().slice(0, 10))
+      .lte('period_start', period.to.toISOString().slice(0, 10))
+      .then(({ data }) => setRecords(data ?? []))
+  }, [connections, tenantId, period])
+
+  const monthly = useMemo(() => buildMonthlyFromRecords(records, period), [records, period])
+  const totalElec = monthly.reduce((a, r) => a + r.elec, 0)
+  const eff = area > 0 ? (totalElec / area).toFixed(1) : '—'
+  const co2 = (totalElec * 0.233 / 1000).toFixed(1)
 
   function hash(s: string, salt = 0) {
     return s.split('').reduce((a, c) => a + c.charCodeAt(0), 0) + salt
@@ -287,18 +429,21 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
                 <Hotel size={16} className="text-accent" />
                 <h1 className="text-xl font-semibold text-white">{building.name}</h1>
                 <LabelBadge label={building.energy_label} />
-                <span className={`status-${building.status.toLowerCase().replace(' ', '-')}`}>{building.status}</span>
+                <span className={`status-${(building.status ?? 'inactive').toLowerCase().replace(' ', '-')}`}>
+                  {building.status ?? 'Unknown'}
+                </span>
               </div>
               <div className="flex items-center gap-1.5 text-sm text-white/40">
-                <MapPin size={12} /> {building.address}
+                <MapPin size={12} /> {building.address ?? building.sites?.cities?.name ?? '—'}
               </div>
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Total Area', value: `${building.area_m2.toLocaleString()} m²`, icon: Building2, color: '#3b82f6' },
-              { label: 'Year Built', value: String(building.year_built),                icon: Award,     color: '#f59e0b' },
-              { label: 'Occupancy',  value: `${building.occupancy_pct}%`,               icon: Users,     color: '#10b981' },
+              { label: 'Total Area', value: building.area_m2 ? `${building.area_m2.toLocaleString()} m²` : '—', icon: Building2, color: '#3b82f6' },
+              { label: 'Year Built', value: String(building.year_built ?? '—'), icon: Award, color: '#f59e0b' },
+              { label: 'Occupancy',  value: building.occupancy_pct ? `${building.occupancy_pct}%` : '—', icon: Users, color: '#10b981' },
+              { label: 'Floors',     value: String(building.floors ?? '—'), icon: Building2, color: '#8b5cf6' },
             ].map(({ label, value, icon: Icon, color }) => (
               <div key={label} className="bg-bg-secondary rounded-xl p-3">
                 <div className="flex items-center gap-1.5 mb-1">
@@ -313,10 +458,10 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: 'Electricity/yr', value: `${(building.elec_kwh_year/1000).toFixed(0)}K kWh`, icon: Zap,       color: '#3b82f6' },
-            { label: 'Gas/yr',         value: `${building.gas_m3_year.toLocaleString()} m³`,       icon: Flame,     color: '#f59e0b' },
-            { label: 'Efficiency',     value: `${eff} kWh/m²`,                                     icon: BarChart3, color: '#10b981' },
-            { label: 'CO₂ Emissions',  value: `${co2} tCO₂/yr`,                                    icon: Leaf,      color: '#6ee7b7' },
+            { label: 'Electricity/yr', value: `${(totalElec/1000).toFixed(0)}K kWh`, icon: Zap,       color: '#3b82f6' },
+            { label: 'Connections',    value: String(connections.length),             icon: Link2,     color: '#f59e0b' },
+            { label: 'Efficiency',     value: `${eff} kWh/m²`,                        icon: BarChart3, color: '#10b981' },
+            { label: 'CO₂ Emissions',  value: `${co2} tCO₂/yr`,                       icon: Leaf,      color: '#6ee7b7' },
           ].map(({ label, value, icon: Icon, color }) => (
             <div key={label} className="card">
               <div className="flex items-center gap-1.5 mb-2">
@@ -332,9 +477,9 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
           <div className="text-xs font-semibold text-white/50 uppercase tracking-widest mb-4">Certifications & Standards</div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div><div className="label mb-1.5">Energy Label</div><LabelBadge label={building.energy_label} /></div>
-            <div><div className="label mb-1.5">BREEAM</div><span className="text-sm font-semibold text-white">{building.breeam}</span></div>
-            <div><div className="label mb-1.5">LEED</div><span className="text-sm font-semibold text-white">{building.leed}</span></div>
-            <div><div className="label mb-1.5">Meters</div><span className="text-sm font-semibold text-white">{building.meter_count} active</span></div>
+            <div><div className="label mb-1.5">BREEAM</div><span className="text-sm font-semibold text-white">{building.breeam_rating ?? '—'}</span></div>
+            <div><div className="label mb-1.5">LEED</div><span className="text-sm font-semibold text-white">{building.leed_rating ?? '—'}</span></div>
+            <div><div className="label mb-1.5">Meters</div><span className="text-sm font-semibold text-white">{connections.length} active</span></div>
           </div>
         </div>
 
@@ -345,7 +490,7 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
               { icon: Thermometer, label: 'Avg Temp',    value: `${22 + (hash(building.id) % 4)}°C`,      color: '#f59e0b' },
               { icon: Droplets,    label: 'Humidity',    value: `${45 + (hash(building.id, 3) % 20)}%`,    color: '#3b82f6' },
               { icon: Wind,        label: 'Air Quality', value: `${30 + (hash(building.id, 7) % 50)} AQI`, color: '#10b981' },
-              { icon: Users,       label: 'Occupancy',   value: `${building.occupancy_pct}%`,              color: '#8b5cf6' },
+              { icon: Users,       label: 'Occupancy',   value: building.occupancy_pct ? `${building.occupancy_pct}%` : '—', color: '#8b5cf6' },
             ].map(({ icon: Icon, label, value, color }) => (
               <div key={label} className="bg-bg-secondary rounded-xl p-3">
                 <div className="flex items-center gap-1.5 mb-1"><Icon size={11} style={{ color }} /><span className="label">{label}</span></div>
@@ -378,7 +523,7 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
           </ResponsiveContainer>
         </div>
 
-        <BuildingConnectionsSection building={building} />
+        <BuildingConnectionsSection siteId={building.site_id} />
 
         {showTable && (
           <div className="card p-0 overflow-hidden">
@@ -398,7 +543,7 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
                     <td className="tbl-td text-white/70">{r.month}</td>
                     <td className="tbl-td text-right font-mono text-blue-300">{r.elec.toLocaleString()}</td>
                     <td className="tbl-td text-right font-mono text-amber-300">{r.gas.toLocaleString()}</td>
-                    <td className="tbl-td text-right font-mono text-green-300">{(r.elec / building.area_m2).toFixed(1)}</td>
+                    <td className="tbl-td text-right font-mono text-green-300">{area > 0 ? (r.elec / area).toFixed(1) : '—'}</td>
                     <td className="tbl-td text-right font-mono text-white/50">{Math.round(r.elec * 0.233).toLocaleString()}</td>
                   </tr>
                 ))}
@@ -406,10 +551,10 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
               <tfoot>
                 <tr className="border-t-2 border-border-default bg-bg-card">
                   <td className="tbl-td font-bold text-white/50">Total</td>
-                  <td className="tbl-td text-right font-bold font-mono text-blue-300">{monthly.reduce((a,r)=>a+r.elec,0).toLocaleString()}</td>
+                  <td className="tbl-td text-right font-bold font-mono text-blue-300">{totalElec.toLocaleString()}</td>
                   <td className="tbl-td text-right font-bold font-mono text-amber-300">{monthly.reduce((a,r)=>a+r.gas,0).toLocaleString()}</td>
                   <td className="tbl-td text-right font-bold font-mono text-green-300">{eff}</td>
-                  <td className="tbl-td text-right font-bold font-mono text-white/50">{Math.round(monthly.reduce((a,r)=>a+r.elec,0)*0.233).toLocaleString()}</td>
+                  <td className="tbl-td text-right font-bold font-mono text-white/50">{Math.round(totalElec*0.233).toLocaleString()}</td>
                 </tr>
               </tfoot>
             </table>
@@ -421,17 +566,15 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
   )
 }
 
-function BuildingRow({ building }: { building: MockBuilding }) {
+// ─── Building row (list view) ─────────────────────────────────────────────────
+function BuildingRow({ building, connections }: { building: DBBuilding; connections: DBConnection[] }) {
   const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
-  const eff = (building.elec_kwh_year / building.area_m2).toFixed(1)
-  const effColor = Number(eff) < 100 ? '#10b981' : Number(eff) < 200 ? '#f59e0b' : '#ef4444'
-  const conns = useMemo(() => buildingConnections(building), [building.id])
+  const area = building.area_m2 ?? 1
 
   return (
     <>
       <tr className="tbl-row group">
-        {/* Expand toggle */}
         <td className="tbl-td w-8 pr-0">
           <button
             onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}
@@ -446,37 +589,39 @@ function BuildingRow({ building }: { building: MockBuilding }) {
             <div>
               <div className="text-white/80 font-medium group-hover:text-accent-hover transition-colors">{building.name}</div>
               <div className="text-[10px] text-white/35 flex items-center gap-1 mt-0.5">
-                <MapPin size={8} /> {building.address}
+                <MapPin size={8} /> {building.address ?? building.sites?.cities?.name ?? '—'}
               </div>
             </div>
           </div>
         </td>
-        <td className="tbl-td text-right font-mono text-white/60">{building.area_m2.toLocaleString()} m²</td>
+        <td className="tbl-td text-right font-mono text-white/60">{building.area_m2 ? `${building.area_m2.toLocaleString()} m²` : '—'}</td>
         <td className="tbl-td text-center"><LabelBadge label={building.energy_label} /></td>
-        <td className="tbl-td text-right font-mono" style={{ color: effColor }}>{eff} kWh/m²</td>
-        <td className="tbl-td text-right font-mono text-blue-300">{(building.elec_kwh_year/1000).toFixed(0)}K kWh</td>
-        <td className="tbl-td text-right font-mono text-amber-300">{building.gas_m3_year.toLocaleString()} m³</td>
-        <td className="tbl-td text-white/50">{building.breeam}</td>
-        <td className="tbl-td text-white/50">{building.leed}</td>
-        <td className="tbl-td text-center text-white/50">{building.meter_count}</td>
-        <td className="tbl-td"><span className={`status-${building.status.toLowerCase().replace(' ', '-')}`}>{building.status}</span></td>
+        <td className="tbl-td text-right font-mono text-white/50">{area > 0 ? `— kWh/m²` : '—'}</td>
+        <td className="tbl-td text-white/50">{building.breeam_rating ?? '—'}</td>
+        <td className="tbl-td text-white/50">{building.leed_rating ?? '—'}</td>
+        <td className="tbl-td text-center text-white/50">{connections.length}</td>
+        <td className="tbl-td">
+          <span className={`status-${(building.status ?? 'inactive').toLowerCase().replace(' ', '-')}`}>
+            {building.status ?? 'Unknown'}
+          </span>
+        </td>
         <td className="tbl-td text-right">
           <ChevronRight size={14} className="text-white/20 group-hover:text-accent transition-colors ml-auto cursor-pointer"
             onClick={() => navigate(`/buildings/${building.id}`)} />
         </td>
       </tr>
 
-      {/* Expanded connections rows */}
       {expanded && (
         <tr>
-          <td colSpan={12} className="px-4 pb-3 bg-bg-secondary/40 border-b border-border-subtle">
+          <td colSpan={10} className="px-4 pb-3 bg-bg-secondary/40 border-b border-border-subtle">
             <div className="pt-2 space-y-1.5">
               <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                 <Link2 size={9} /> Connections & Meters
               </div>
-              {conns.map(c => {
-                const color = PRODUCT_COLOR[c.product] ?? '#6b7280'
-                const Icon  = PRODUCT_ICON[c.product] ?? Zap
+              {connections.map(c => {
+                const product = c.product ?? 'Electricity'
+                const color = PRODUCT_COLOR[product] ?? '#6b7280'
+                const Icon  = PRODUCT_ICON[product] ?? Zap
                 return (
                   <button
                     key={c.id}
@@ -489,20 +634,20 @@ function BuildingRow({ building }: { building: MockBuilding }) {
                     </div>
                     <div className="flex-1 min-w-0">
                       <span className="text-xs text-white/75 font-medium group-hover/conn:text-accent-hover transition-colors">
-                        {c.name}
+                        {c.site_name ?? c.address ?? c.id}
                       </span>
                       <span className="text-[11px] text-white/30 font-mono ml-2">{c.ean_code}</span>
                     </div>
                     <div className="flex items-center gap-3 text-[11px] text-white/35 flex-shrink-0">
                       <span>{c.connection_type}</span>
                       <span className="font-mono text-white/25">{c.meter_number}</span>
-                      <span className={`status-${c.status.toLowerCase()}`}>{c.status}</span>
+                      <span className={`status-${(c.status ?? 'inactive').toLowerCase()}`}>{c.status}</span>
                       <ChevronRight size={11} className="text-white/20 group-hover/conn:text-accent" />
                     </div>
                   </button>
                 )
               })}
-              {conns.length === 0 && (
+              {connections.length === 0 && (
                 <div className="text-xs text-white/25 py-2">No connections linked</div>
               )}
             </div>
@@ -513,33 +658,70 @@ function BuildingRow({ building }: { building: MockBuilding }) {
   )
 }
 
+// ─── Building list view ───────────────────────────────────────────────────────
 function BuildingList() {
+  const tenantId = useTenantId()
   const [tab, setTab] = useState<'list' | 'benchmark'>('list')
   const [search, setSearch] = useState('')
   const [labelFilter, setLabelFilter] = useState<EnergyLabel | ''>('')
   const [searchParams] = useSearchParams()
   const siteFilter = searchParams.get('site')
 
-  const allBuildings = siteFilter
-    ? mockBuildingsForSite(siteFilter, 3)
-    : MOCK_SITE_IDS.flatMap(sid => mockBuildingsForSite(sid, 3))
+  const [buildings, setBuildings] = useState<DBBuilding[]>([])
+  const [connectionsBySite, setConnectionsBySite] = useState<Record<string, DBConnection[]>>({})
+  const [loading, setLoading] = useState(true)
 
-  const filtered = allBuildings.filter(b => {
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      let query = supabase
+        .from('buildings')
+        .select('*, sites(name, cities(name, countries(name, code)))')
+        .eq('tenant_id', tenantId)
+      if (siteFilter) query = query.eq('site_id', siteFilter)
+      const { data: bldgs } = await query
+      setBuildings(bldgs ?? [])
+
+      // Load all connections for the tenant grouped by site_id
+      const { data: conns } = await supabase
+        .from('energy_connections')
+        .select('*')
+        .eq('tenant_id', tenantId)
+      const grouped: Record<string, DBConnection[]> = {}
+      for (const c of (conns ?? [])) {
+        if (!c.site_id) continue
+        if (!grouped[c.site_id]) grouped[c.site_id] = []
+        grouped[c.site_id].push(c)
+      }
+      setConnectionsBySite(grouped)
+      setLoading(false)
+    }
+    load()
+  }, [tenantId, siteFilter])
+
+  const filtered = buildings.filter(b => {
     const q = search.toLowerCase()
-    return (!q || b.name.toLowerCase().includes(q) || b.address.toLowerCase().includes(q))
+    const addr = (b.address ?? '').toLowerCase()
+    return (!q || b.name.toLowerCase().includes(q) || addr.includes(q))
       && (!labelFilter || b.energy_label === labelFilter)
   })
 
-  const totalArea = filtered.reduce((a, b) => a + b.area_m2, 0)
-  const totalElec = filtered.reduce((a, b) => a + b.elec_kwh_year, 0)
-  const avgEff    = filtered.length ? (totalElec / totalArea).toFixed(1) : '—'
+  const totalArea = filtered.reduce((a, b) => a + (b.area_m2 ?? 0), 0)
+
+  // For benchmarking, build synthetic BenchmarkBuilding from DB buildings + 0 elec (no consumption pre-loaded here)
+  const benchmarkBuildings: BenchmarkBuilding[] = filtered.map(b => ({
+    id: b.id,
+    name: b.name,
+    area_m2: b.area_m2 ?? 1,
+    elec_kwh_year: 0, // Would need consumption_records aggregation; zero for now
+    energy_label: (b.energy_label ?? 'C') as EnergyLabel,
+  }))
 
   return (
     <div className="flex flex-col h-full">
       <Topbar title="Buildings" />
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
 
-        {/* Tab bar */}
         <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-xl p-1 w-fit">
           {([['list', 'All Buildings'], ['benchmark', 'EUI Benchmarking']] as const).map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)}
@@ -550,15 +732,15 @@ function BuildingList() {
         </div>
 
         {tab === 'benchmark' ? (
-          <BenchmarkingView buildings={allBuildings} />
+          <BenchmarkingView buildings={benchmarkBuildings} />
         ) : (<>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: 'Total Buildings', value: String(filtered.length),                  icon: Hotel,     color: '#3b82f6' },
+            { label: 'Total Buildings', value: loading ? '…' : String(filtered.length), icon: Hotel,     color: '#3b82f6' },
             { label: 'Total Area',      value: `${(totalArea/1000).toFixed(0)}K m²`,     icon: Building2, color: '#8b5cf6' },
-            { label: 'Total Elec/yr',   value: `${(totalElec/1000000).toFixed(1)}M kWh`, icon: Zap,       color: '#10b981' },
-            { label: 'Avg Efficiency',  value: `${avgEff} kWh/m²`,                       icon: BarChart3, color: '#f59e0b' },
+            { label: 'Total Sites',     value: String(new Set(filtered.map(b => b.site_id)).size), icon: MapPin, color: '#10b981' },
+            { label: 'Connections',     value: String(Object.values(connectionsBySite).reduce((a, v) => a + v.length, 0)), icon: BarChart3, color: '#f59e0b' },
           ].map(({ label, value, icon: Icon, color }) => (
             <div key={label} className="card">
               <div className="flex items-center gap-1.5 mb-2"><Icon size={12} style={{ color }} /><span className="label">{label}</span></div>
@@ -579,32 +761,36 @@ function BuildingList() {
           </select>
         </div>
 
-        <div className="card p-0 overflow-hidden">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="border-b border-border-subtle">
-                <th className="tbl-th w-8" />
-                <th className="tbl-th">Building</th>
-                <th className="tbl-th text-right">Area</th>
-                <th className="tbl-th text-center">Label</th>
-                <th className="tbl-th text-right">Efficiency</th>
-                <th className="tbl-th text-right">Electricity</th>
-                <th className="tbl-th text-right">Gas</th>
-                <th className="tbl-th">BREEAM</th>
-                <th className="tbl-th">LEED</th>
-                <th className="tbl-th text-center">Meters</th>
-                <th className="tbl-th">Status</th>
-                <th className="tbl-th" />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(b => <BuildingRow key={b.id} building={b} />)}
-              {filtered.length === 0 && (
-                <tr><td colSpan={12} className="tbl-td text-center text-white/30 py-8">No buildings match</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        {loading ? (
+          <div className="card text-center text-white/30 py-12">Loading buildings…</div>
+        ) : (
+          <div className="card p-0 overflow-hidden">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-border-subtle">
+                  <th className="tbl-th w-8" />
+                  <th className="tbl-th">Building</th>
+                  <th className="tbl-th text-right">Area</th>
+                  <th className="tbl-th text-center">Label</th>
+                  <th className="tbl-th text-right">EUI</th>
+                  <th className="tbl-th">BREEAM</th>
+                  <th className="tbl-th">LEED</th>
+                  <th className="tbl-th text-center">Connections</th>
+                  <th className="tbl-th">Status</th>
+                  <th className="tbl-th" />
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(b => (
+                  <BuildingRow key={b.id} building={b} connections={connectionsBySite[b.site_id] ?? []} />
+                ))}
+                {filtered.length === 0 && (
+                  <tr><td colSpan={10} className="tbl-td text-center text-white/30 py-8">No buildings match</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         </>)}
       </div>
@@ -612,25 +798,25 @@ function BuildingList() {
   )
 }
 
+// ─── Router ───────────────────────────────────────────────────────────────────
 export default function Buildings() {
   const { id } = useParams()
-  if (id) {
-    // ID format is `${siteId}-b${index}` — parse it to regenerate mock data
-    // regardless of whether siteId is a UUID or a mock string
-    const match = id.match(/^(.+)-b(\d+)$/)
-    let building = null
-    if (match) {
-      const siteId = match[1]
-      const idx    = parseInt(match[2], 10)
-      building     = mockBuildingsForSite(siteId, idx + 1)[idx] ?? null
-    }
-    // fallback: search across hardcoded mock site IDs
-    if (!building) {
-      const all = MOCK_SITE_IDS.flatMap(sid => mockBuildingsForSite(sid, 3))
-      building  = all.find(b => b.id === id) ?? null
-    }
-    if (!building) return <div className="p-8 text-white/40">Building not found</div>
-    return <BuildingDetail building={building} />
-  }
-  return <BuildingList />
+  const tenantId = useTenantId()
+  const [building, setBuilding] = useState<DBBuilding | null | undefined>(undefined)
+
+  useEffect(() => {
+    if (!id) return
+    supabase
+      .from('buildings')
+      .select('*, sites(name, cities(name, countries(name, code)))')
+      .eq('tenant_id', tenantId)
+      .eq('id', id)
+      .single()
+      .then(({ data }) => setBuilding(data ?? null))
+  }, [id, tenantId])
+
+  if (!id) return <BuildingList />
+  if (building === undefined) return <div className="p-8 text-white/40">Loading…</div>
+  if (building === null) return <div className="p-8 text-white/40">Building not found</div>
+  return <BuildingDetail building={building} />
 }

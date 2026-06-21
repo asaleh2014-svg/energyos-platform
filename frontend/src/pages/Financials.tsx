@@ -1,52 +1,48 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
-import {
-  MOCK_SITES, UAE_TARIFFS, SITE_UTILITY, METER_ANNUAL_CONSUMPTION,
-  CONSUMPTION_MONTHLY, MONTHS, METER_BUDGETS, type TariffStructure,
-} from '@/lib/mockData'
 import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS } from '@/types'
+import { useTenantId } from '@/lib/auth'
+import { supabase } from '@/lib/supabase'
+import { fetchConnections, fetchConsumption, groupByMonth } from '@/lib/dbQueries'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, ReferenceLine, Cell,
 } from 'recharts'
 import clsx from 'clsx'
-import { Edit2, Check, X, Copy, ChevronDown, Download, RefreshCw } from 'lucide-react'
+import { Edit2, Check, X, Copy, ChevronDown, Download, RefreshCw, Loader2 } from 'lucide-react'
 import { ChartCard } from '@/components/ChartCard'
 
-type Tab = 'tariffs' | 'budget' | 'projections' | 'deviations' | 'cost-report'
+type Tab = 'tariffs' | 'cost-summary' | 'deviations' | 'cost-report'
 const TABS: { id: Tab; label: string }[] = [
-  { id:'tariffs',     label:'Tariffs'     },
-  { id:'budget',      label:'Budget'      },
-  { id:'projections', label:'Projections' },
-  { id:'deviations',  label:'Deviations'  },
-  { id:'cost-report', label:'Cost Report' },
+  { id:'tariffs',      label:'Tariffs'      },
+  { id:'cost-summary', label:'Cost Summary' },
+  { id:'deviations',   label:'Deviations'   },
+  { id:'cost-report',  label:'Cost Report'  },
 ]
 
 const TT = { background:'#0d2b35', border:'1px solid #1a5568', borderRadius:8, fontSize:11 }
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-// ─── Cost report static data ──────────────────────────────────────────────────
+// ─── UAE Tariff data (reference) ──────────────────────────────────────────────
+const UAE_TARIFFS: Record<string, {
+  label: string; commodity_elec: number; commodity_gas: number;
+  distribution: number; capacity_charge: number; municipality_tax: number; vat: number
+}> = {
+  DEWA: { label:'DEWA (Dubai)',       commodity_elec:0.23, commodity_gas:0.29, distribution:0.067, capacity_charge:0.0, municipality_tax:0.10, vat:0.05 },
+  ADDC: { label:'ADDC (Abu Dhabi)',   commodity_elec:0.21, commodity_gas:0.25, distribution:0.055, capacity_charge:0.0, municipality_tax:0.05, vat:0.05 },
+  SEWA: { label:'SEWA (Sharjah)',     commodity_elec:0.19, commodity_gas:0.22, distribution:0.048, capacity_charge:0.0, municipality_tax:0.10, vat:0.05 },
+  FEWA: { label:'FEWA (N. Emirates)', commodity_elec:0.17, commodity_gas:0.20, distribution:0.042, capacity_charge:0.0, municipality_tax:0.05, vat:0.05 },
+}
 
-const REPORT_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const ACTUAL_COUNT  = 5   // Jan–May are actuals, Jun–Dec are forecast
+type TariffStructure = Omit<typeof UAE_TARIFFS[string], 'label'> & { label?: string }
 
-// Monthly kWh consumption
-const CON_NORMAL = [324473,303011,317639,312178,311392,345305,361102,317892,336723,339431,313974,317543]
-const CON_LOW    = [252614,213466,210126,233197,284486,262794,234861,249932,221536,217759,233854,242437]
-
-// Monthly costs (AED)
-const COST_NETWORK = [22345,20763,21987,21241,24372,23982,22748,22474,21858,22156,21535,21816]
-const COST_ENTAX   = [40250,28097,24422,25203,25024,23463,24592,22319,21718,21266,20436,20609]
-const COST_VAT     = [13145,10261, 9746, 9753,10373, 9964, 9941, 9406, 9151, 9119, 8814, 8909]
-const COST_SUPPLY  = [   0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0,    0]
-
-// ─── Tariff editor ────────────────────────────────────────────────────────────
-
+// ─── Tariff field editor ──────────────────────────────────────────────────────
 function TariffField({
   label, value, unit, onChange,
 }: { label: string; value: number; unit: string; onChange: (v: number) => void }) {
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(String(value))
+  const [draft,   setDraft]   = useState(String(value))
   return (
     <div className="flex items-center justify-between py-2 border-b border-border-subtle last:border-0">
       <span className="text-xs text-white/50">{label}</span>
@@ -82,33 +78,43 @@ function TariffField({
 }
 
 // ─── Tariffs tab ──────────────────────────────────────────────────────────────
-
-function TariffsTab() {
+function TariffsTab({ tenantId }: { tenantId: string }) {
   const { siteTariffs, setSiteTariff, applyTariffToSites } = useAppStore()
-  const [selectedSite, setSelectedSite] = useState('site-1')
-  const [applyMsg, setApplyMsg] = useState('')
+  const [sites, setSites]         = useState<any[]>([])
+  const [selectedSite, setSelectedSite] = useState('')
+  const [applyMsg, setApplyMsg]   = useState('')
 
-  const site = MOCK_SITES.find(s => s.id === selectedSite)!
-  const tariff: TariffStructure = siteTariffs[selectedSite] ?? UAE_TARIFFS[SITE_UTILITY[selectedSite]]
-  const utility = SITE_UTILITY[selectedSite]
-  const reference = UAE_TARIFFS[utility]
+  useEffect(() => {
+    fetchConnections(tenantId).then(conns => {
+      // deduplicate site names
+      const unique: Record<string, any> = {}
+      for (const c of conns) {
+        if (c.site_id && !unique[c.site_id]) unique[c.site_id] = { id: c.site_id, name: c.site_name ?? c.site_id }
+      }
+      const arr = Object.values(unique)
+      setSites(arr)
+      if (arr.length > 0 && !selectedSite) setSelectedSite(arr[0].id)
+    })
+  }, [tenantId])
+
+  const site       = sites.find(s => s.id === selectedSite) ?? { name: '—', id: selectedSite }
+  const defaultT   = UAE_TARIFFS.DEWA
+  const tariff: TariffStructure = siteTariffs[selectedSite] ?? defaultT
+  const reference  = UAE_TARIFFS.DEWA
 
   const setField = (field: keyof TariffStructure) => (v: number) => {
     setSiteTariff(selectedSite, { ...tariff, [field]: v })
   }
 
-  const sameCitySites = MOCK_SITES.filter(s => s.city === site.city).map(s => s.id)
-  const allSites = MOCK_SITES.map(s => s.id)
+  const totalRate     = tariff.commodity_elec + tariff.distribution
+  const effectiveRate = totalRate * (1 + tariff.municipality_tax) * (1 + tariff.vat)
+  const refRate       = (reference.commodity_elec + reference.distribution) * (1 + reference.municipality_tax) * (1 + reference.vat)
 
   const doApply = (targets: string[]) => {
     applyTariffToSites(selectedSite, targets)
-    setApplyMsg(`Tariff applied to ${targets.length === allSites.length ? 'all sites' : `all sites in ${site.city}`}.`)
+    setApplyMsg(`Tariff applied to ${targets.length} site${targets.length !== 1 ? 's' : ''}.`)
     setTimeout(() => setApplyMsg(''), 3000)
   }
-
-  const totalRate = tariff.commodity_elec + tariff.distribution
-  const effectiveRate = totalRate * (1 + tariff.municipality_tax) * (1 + tariff.vat)
-  const refRate = (reference.commodity_elec + reference.distribution) * (1 + reference.municipality_tax) * (1 + reference.vat)
 
   return (
     <div className="grid grid-cols-2 gap-5">
@@ -116,9 +122,7 @@ function TariffsTab() {
         <div>
           <div className="text-[11px] text-white/40 mb-1.5">Select site</div>
           <select value={selectedSite} onChange={e => setSelectedSite(e.target.value)} className="w-full form-select text-sm">
-            {MOCK_SITES.map(s => (
-              <option key={s.id} value={s.id}>{s.name} ({SITE_UTILITY[s.id]})</option>
-            ))}
+            {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
 
@@ -126,7 +130,7 @@ function TariffsTab() {
           <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between">
             <div>
               <div className="text-xs font-semibold text-white">{site.name}</div>
-              <div className="text-[10px] text-white/35 mt-0.5">{utility} — {site.city}</div>
+              <div className="text-[10px] text-white/35 mt-0.5">DEWA UAE</div>
             </div>
             <div className="text-right">
               <div className="text-[10px] text-white/35">Effective rate</div>
@@ -140,8 +144,8 @@ function TariffsTab() {
             <TariffField label="Electricity" value={tariff.commodity_elec} unit="AED/kWh" onChange={setField('commodity_elec')} />
             <TariffField label="Gas"         value={tariff.commodity_gas}  unit="AED/m³"  onChange={setField('commodity_gas')} />
             <div className="text-[10px] text-white/30 uppercase tracking-widest py-2 border-b border-border-subtle mb-1 mt-2">Non-Commodity</div>
-            <TariffField label="Distribution / Network" value={tariff.distribution}    unit="AED/kWh"    onChange={setField('distribution')} />
-            <TariffField label="Capacity charge"        value={tariff.capacity_charge} unit="AED/kW/mo"  onChange={setField('capacity_charge')} />
+            <TariffField label="Distribution / Network" value={tariff.distribution}    unit="AED/kWh"   onChange={setField('distribution')} />
+            <TariffField label="Capacity charge"        value={tariff.capacity_charge} unit="AED/kW/mo" onChange={setField('capacity_charge')} />
             <div className="text-[10px] text-white/30 uppercase tracking-widest py-2 border-b border-border-subtle mb-1 mt-2">Taxes</div>
             <TariffField label="Municipality tax" value={tariff.municipality_tax * 100} unit="%" onChange={v => setField('municipality_tax')(v / 100)} />
             <TariffField label="VAT"               value={tariff.vat * 100}             unit="%" onChange={v => setField('vat')(v / 100)} />
@@ -156,51 +160,14 @@ function TariffsTab() {
             <div className="mb-3 text-xs text-success-light bg-success/10 border border-success/20 rounded-lg px-3 py-2">✓ {applyMsg}</div>
           )}
           <div className="space-y-2">
-            <button onClick={() => doApply(sameCitySites)} className="w-full btn-secondary text-left justify-between">
-              All sites in {site.city} ({sameCitySites.length}) <Copy size={12} />
-            </button>
-            <button onClick={() => doApply(allSites)} className="w-full btn-secondary text-left justify-between">
-              All sites in portfolio ({allSites.length}) <Copy size={12} />
+            <button onClick={() => doApply(sites.map(s => s.id))} className="w-full btn-secondary text-left justify-between">
+              All sites in portfolio ({sites.length}) <Copy size={12} />
             </button>
           </div>
         </div>
       </div>
 
       <div className="space-y-4">
-        <div className="card">
-          <h3 className="text-xs font-semibold text-white mb-3">Your Tariff vs {utility} Published Rate</h3>
-          <div className="space-y-2">
-            {[
-              { label:'Electricity', yours: tariff.commodity_elec, ref: reference.commodity_elec, unit:'AED/kWh' },
-              { label:'Distribution', yours: tariff.distribution, ref: reference.distribution, unit:'AED/kWh' },
-              { label:'Gas', yours: tariff.commodity_gas, ref: reference.commodity_gas, unit:'AED/m³' },
-              { label:'Municipality tax', yours: tariff.municipality_tax*100, ref: reference.municipality_tax*100, unit:'%' },
-            ].map(({ label, yours, ref, unit }) => {
-              const diff = yours - ref
-              const pct = ref > 0 ? ((diff/ref)*100).toFixed(1) : '0'
-              return (
-                <div key={label} className="flex items-center gap-3">
-                  <div className="w-32 text-[11px] text-white/50">{label}</div>
-                  <div className="flex-1 flex items-center gap-2">
-                    <div className="h-1.5 flex-1 bg-bg-primary rounded-full overflow-hidden relative">
-                      <div className="h-full bg-white/10 rounded-full" style={{ width:`${Math.min((ref/0.6)*100,100)}%` }} />
-                      <div className="absolute top-0 h-full rounded-full" style={{
-                        left:0, width:`${Math.min((yours/0.6)*100,100)}%`,
-                        background: diff > 0.002 ? '#ef4444' : diff < -0.002 ? '#10b981' : '#3b82f6',
-                        opacity:0.7,
-                      }} />
-                    </div>
-                    <span className="text-xs font-mono text-white w-16 text-right">{yours.toFixed(3)} {unit}</span>
-                    <span className={clsx('text-[10px] font-semibold w-14 text-right',
-                      diff > 0.001 ? 'text-danger-light' : diff < -0.001 ? 'text-success-light' : 'text-white/40'
-                    )}>{diff >= 0 ? '+' : ''}{pct}%</span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
         <div className="card p-0 overflow-hidden">
           <div className="px-4 py-3 border-b border-border-subtle">
             <h3 className="text-xs font-semibold text-white">UAE Published Commercial Rates 2024</h3>
@@ -215,8 +182,8 @@ function TariffsTab() {
             </thead>
             <tbody>
               {Object.entries(UAE_TARIFFS).map(([key, t]) => (
-                <tr key={key} className={clsx('border-b border-border-subtle hover:bg-bg-card/50', key === utility ? 'bg-accent/5' : '')}>
-                  <td className="tbl-td font-semibold text-white/80">{t.label.split(' ')[0]}</td>
+                <tr key={key} className="border-b border-border-subtle hover:bg-bg-card/50">
+                  <td className="tbl-td font-semibold text-white/80">{key}</td>
                   <td className="tbl-td font-mono text-white/70">{t.commodity_elec.toFixed(2)}</td>
                   <td className="tbl-td font-mono text-white/70">{t.commodity_gas.toFixed(2)}</td>
                   <td className="tbl-td font-mono text-white/60">{t.distribution.toFixed(3)}</td>
@@ -231,192 +198,92 @@ function TariffsTab() {
   )
 }
 
-// ─── Budget tab ───────────────────────────────────────────────────────────────
+// ─── Cost Summary tab ─────────────────────────────────────────────────────────
+function CostSummaryTab({ tenantId, currencySymbol }: { tenantId: string; currencySymbol: string }) {
+  const [loading, setLoading]   = useState(true)
+  const [monthlyData, setMonthlyData] = useState<any[]>([])
+  const [siteCosts,  setSiteCosts]    = useState<any[]>([])
+  const [totalCost,  setTotalCost]    = useState(0)
+  const [totalElec,  setTotalElec]    = useState(0)
+  const [totalGas,   setTotalGas]     = useState(0)
 
-function BudgetTab({ filters }: { filters: CostReportFilters }) {
-  const factor = 1 - filters.savings / 100
-  const meterFilter = (m: typeof METER_BUDGETS[0]) =>
-    filters.product === 'electricity' ? m.type === 'Electricity'
-    : filters.product === 'gas'       ? m.type === 'Gas'
-    : true
-  const filteredBudgets = METER_BUDGETS.filter(meterFilter)
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      const [records, conns] = await Promise.all([
+        fetchConsumption(tenantId),
+        fetchConnections(tenantId),
+      ])
 
-  const totalBudget = filteredBudgets.reduce((sum, m) =>
-    sum + m.monthly.reduce((s, mo) => s + mo.commodity_budget + mo.transport_budget + mo.tax_budget, 0), 0) * factor
-  const totalActual = filteredBudgets.reduce((sum, m) =>
-    sum + m.monthly.reduce((s, mo) => s + mo.commodity_actual + mo.transport_actual + mo.tax_actual, 0), 0) * factor
-  const deviation = totalActual - totalBudget
-  const pct = totalBudget > 0 ? ((deviation / totalBudget) * 100).toFixed(1) : '0'
+      // Monthly totals
+      const monthly = groupByMonth(records)
+      const mData = monthly.map(m => ({
+        month: new Date(m.month + '-01').toLocaleString('default', { month:'short', year:'2-digit' }),
+        electricity: Math.round(m.cost * (m.elec / (m.elec + m.gas || 1))),
+        gas:         Math.round(m.cost * (m.gas  / (m.elec + m.gas || 1))),
+        total:       Math.round(m.cost),
+      }))
+      setMonthlyData(mData)
 
-  const monthlyData = MONTHS.map((month, i) => {
-    const budget = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_budget + mo.transport_budget + mo.tax_budget }, 0) * factor
-    const actual = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_actual + mo.transport_actual + mo.tax_actual }, 0) * factor
-    return { month, budget: Math.round(budget), actual: Math.round(actual), deviation: Math.round(actual - budget) }
-  })
+      // Site costs
+      const connMap: Record<string, string> = {}
+      for (const c of conns) connMap[c.id] = c.site_name ?? 'Unknown'
 
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-4 gap-4">
-        <div className="card"><div className="label mb-1">Annual Budget</div><div className="text-xl font-semibold text-white">AED {(totalBudget/1000).toFixed(0)}k</div></div>
-        <div className="card"><div className="label mb-1">YTD Actual</div><div className="text-xl font-semibold text-white">AED {(totalActual/1000).toFixed(0)}k</div></div>
-        <div className="card">
-          <div className="label mb-1">Deviation</div>
-          <div className={clsx('text-xl font-semibold', deviation > 0 ? 'text-danger-light' : 'text-success-light')}>
-            {deviation > 0 ? '+' : ''}AED {(deviation/1000).toFixed(0)}k
-          </div>
-          <div className="text-xs text-white/40 mt-0.5">{deviation > 0 ? '+' : ''}{pct}%</div>
-        </div>
-        <div className="card">
-          <div className="label mb-1">Budget Coverage</div>
-          <div className={clsx('text-xl font-semibold', totalActual/totalBudget > 1.05 ? 'text-danger-light' : 'text-success-light')}>
-            {((totalActual/totalBudget)*100).toFixed(1)}%
-          </div>
-        </div>
-      </div>
+      const siteCostMap: Record<string, number> = {}
+      for (const r of records) {
+        const site = connMap[r.connection_id] ?? 'Unknown'
+        siteCostMap[site] = (siteCostMap[site] ?? 0) + Number(r.cost ?? 0)
+      }
+      const sArr = Object.entries(siteCostMap)
+        .map(([site, cost]) => ({ site, cost: Math.round(cost) }))
+        .sort((a, b) => b.cost - a.cost)
+      setSiteCosts(sArr)
 
-      <ChartCard
-        title="Monthly Budget vs Actual (AED)"
-        table={
-          <table className="w-full">
-            <thead><tr>{['Month','Budget (AED)','Actual (AED)','Deviation'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
-            <tbody>
-              {monthlyData.map(row=>(
-                <tr key={row.month} className="tbl-row">
-                  <td className="tbl-td text-white/70">{row.month}</td>
-                  <td className="tbl-td font-mono text-blue-300">{row.budget.toLocaleString()}</td>
-                  <td className="tbl-td font-mono text-white/70">{row.actual.toLocaleString()}</td>
-                  <td className={clsx('tbl-td font-mono font-semibold', row.deviation>0?'text-danger-light':'text-success-light')}>
-                    {row.deviation>0?'+':''}{row.deviation.toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        }
-      >
-        <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={monthlyData} margin={{ top:5, right:20, left:-5, bottom:5 }} barGap={2}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
-            <XAxis dataKey="month" tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-            <Tooltip contentStyle={TT} formatter={(v: number, n: string) => [`AED ${v.toLocaleString()}`, n]} />
-            <Legend wrapperStyle={{ fontSize:10 }} />
-            <Bar dataKey="budget" name="Budget" fill="#3b82f6" opacity={0.3} radius={[3,3,0,0]} maxBarSize={28} />
-            <Bar dataKey="actual" name="Actual" fill="#3b82f6" opacity={0.85} radius={[3,3,0,0]} maxBarSize={28} />
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartCard>
+      const tCost = records.reduce((a, r) => a + Number(r.cost ?? 0), 0)
+      const tElec = records.filter(r => r.unit === 'kWh').reduce((a, r) => a + Number(r.cost ?? 0), 0)
+      const tGas  = records.filter(r => r.unit !== 'kWh').reduce((a, r) => a + Number(r.cost ?? 0), 0)
+      setTotalCost(tCost)
+      setTotalElec(tElec)
+      setTotalGas(tGas)
+      setLoading(false)
+    }
+    load()
+  }, [tenantId])
 
-      <div className="card p-0 overflow-hidden">
-        <div className="px-5 py-3 border-b border-border-subtle"><h2 className="section-title">Per-Meter Budget Summary</h2></div>
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-border-subtle">
-              {['Meter','Site','Type','Annual Budget (AED)','YTD Actual (AED)','Deviation','%'].map(h => (
-                <th key={h} className="tbl-th">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {METER_BUDGETS.map((m, i) => {
-              const budget = m.monthly.reduce((s, mo) => s + mo.commodity_budget + mo.transport_budget + mo.tax_budget, 0)
-              const actual = m.monthly.reduce((s, mo) => s + mo.commodity_actual + mo.transport_actual + mo.tax_actual, 0)
-              const dev = actual - budget
-              const p = ((dev/budget)*100).toFixed(1)
-              return (
-                <tr key={m.connection_id} className={clsx('border-b border-border-subtle hover:bg-bg-card/50', i%2===0 ? 'bg-[#0d3d4a]/30' : '')}>
-                  <td className="tbl-td font-mono text-white/60 text-[10px]">{m.meter}</td>
-                  <td className="tbl-td text-white/70 max-w-[130px] truncate">{m.site}</td>
-                  <td className="tbl-td">
-                    <span className={clsx('text-[10px] px-1.5 py-0.5 rounded-full', m.type==='Electricity' ? 'bg-blue-500/15 text-blue-300' : 'bg-amber-500/15 text-amber-300')}>{m.type}</span>
-                  </td>
-                  <td className="tbl-td font-mono text-white/70 text-right">{budget.toLocaleString()}</td>
-                  <td className="tbl-td font-mono text-white/70 text-right">{actual.toLocaleString()}</td>
-                  <td className={clsx('tbl-td font-mono font-semibold text-right', dev>0 ? 'text-danger-light' : 'text-success-light')}>
-                    {dev>0?'+':''}{dev.toLocaleString()}
-                  </td>
-                  <td className={clsx('tbl-td font-semibold text-right text-[10px]', dev>0 ? 'text-danger-light' : 'text-success-light')}>
-                    {dev>0?'+':''}{p}%
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-// ─── Projections tab ──────────────────────────────────────────────────────────
-
-function ProjectionsTab({ filters }: { filters: CostReportFilters }) {
-  const factor = 1 - filters.savings / 100
-  const { siteTariffs } = useAppStore()
-
-  const projData = MONTHS.map((month, i) => {
-    const elecKwh = CONSUMPTION_MONTHLY.electricity[i]
-    const gasM3   = CONSUMPTION_MONTHLY.gas[i]
-    const sites = MOCK_SITES.map(s => siteTariffs[s.id] ?? UAE_TARIFFS[SITE_UTILITY[s.id]])
-    const avgTariff = sites.reduce((a, t) => ({
-      commodity_elec: a.commodity_elec + t.commodity_elec / sites.length,
-      commodity_gas:  a.commodity_gas  + t.commodity_gas  / sites.length,
-      distribution:   a.distribution   + t.distribution   / sites.length,
-      municipality_tax: a.municipality_tax + t.municipality_tax / sites.length,
-      vat:            a.vat            + t.vat            / sites.length,
-      capacity_charge: a.capacity_charge + t.capacity_charge / sites.length,
-    }), { commodity_elec:0, commodity_gas:0, distribution:0, municipality_tax:0, vat:0, capacity_charge:0 })
-
-    const elecCommodity = Math.round(elecKwh * avgTariff.commodity_elec * factor)
-    const gasCommmodity = Math.round(gasM3   * avgTariff.commodity_gas  * factor)
-    const transport     = Math.round(elecKwh * avgTariff.distribution   * factor)
-    const subtotal      = elecCommodity + gasCommmodity + transport
-    const tax           = Math.round(subtotal * avgTariff.municipality_tax)
-    const vat           = Math.round((subtotal + tax) * avgTariff.vat)
-    const total         = subtotal + tax + vat
-    return { month, elecCommodity, gasCommmodity, transport, tax, vat, total }
-  })
-
-  const annualTotal = projData.reduce((s, d) => s + d.total, 0)
-  const budgetTotal = METER_BUDGETS.reduce((s, m) => s + m.monthly.reduce((a, mo) => a + mo.commodity_budget + mo.transport_budget + mo.tax_budget, 0), 0)
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 size={20} className="animate-spin text-white/30"/></div>
 
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-3 gap-4">
         <div className="card">
-          <div className="label mb-1">Projected Annual Cost</div>
-          <div className="text-xl font-semibold text-white">AED {(annualTotal/1000).toFixed(0)}k</div>
-          <div className="text-xs text-white/40 mt-1">Based on current tariffs</div>
+          <div className="label mb-1">Total Cost</div>
+          <div className="text-xl font-semibold text-white">{currencySymbol} {Math.round(totalCost).toLocaleString()}</div>
+          <div className="text-xs text-white/40 mt-1">All records in DB</div>
         </div>
         <div className="card">
-          <div className="label mb-1">vs Annual Budget</div>
-          <div className={clsx('text-xl font-semibold', annualTotal > budgetTotal ? 'text-danger-light' : 'text-success-light')}>
-            {annualTotal > budgetTotal ? '+' : ''}AED {((annualTotal-budgetTotal)/1000).toFixed(0)}k
-          </div>
-          <div className="text-xs text-white/40 mt-1">{((annualTotal/budgetTotal-1)*100).toFixed(1)}% vs budget</div>
+          <div className="label mb-1">Electricity Cost</div>
+          <div className="text-xl font-semibold text-blue-300">{currencySymbol} {Math.round(totalElec).toLocaleString()}</div>
+          <div className="text-xs text-white/40 mt-1">{totalCost > 0 ? ((totalElec/totalCost)*100).toFixed(1) : 0}% of total</div>
         </div>
         <div className="card">
-          <div className="label mb-1">Peak Month Cost</div>
-          <div className="text-xl font-semibold text-white">AED {Math.max(...projData.map(d=>d.total)).toLocaleString()}</div>
-          <div className="text-xs text-white/40 mt-1">{projData.find(d => d.total === Math.max(...projData.map(x=>x.total)))?.month}</div>
+          <div className="label mb-1">Gas Cost</div>
+          <div className="text-xl font-semibold text-amber-300">{currencySymbol} {Math.round(totalGas).toLocaleString()}</div>
+          <div className="text-xs text-white/40 mt-1">{totalCost > 0 ? ((totalGas/totalCost)*100).toFixed(1) : 0}% of total</div>
         </div>
       </div>
 
       <ChartCard
-        title="12-Month Cost Projection (AED)"
-        subtitle="Stacked: Commodity + Transport/Network + Taxes"
+        title="Monthly Cost Trend (AED)"
+        subtitle="From real consumption_records — electricity vs gas cost split"
         table={
           <table className="w-full">
-            <thead><tr>{['Month','Elec Commodity','Gas Commodity','Transport','Tax','VAT','Total'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
+            <thead><tr>{['Month','Electricity','Gas','Total'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
             <tbody>
-              {projData.map(row=>(
+              {monthlyData.map(row=>(
                 <tr key={row.month} className="tbl-row">
                   <td className="tbl-td text-white/70">{row.month}</td>
-                  <td className="tbl-td font-mono text-blue-300">{row.elecCommodity.toLocaleString()}</td>
-                  <td className="tbl-td font-mono text-amber-300">{row.gasCommmodity.toLocaleString()}</td>
-                  <td className="tbl-td font-mono text-purple-300">{row.transport.toLocaleString()}</td>
-                  <td className="tbl-td font-mono text-red-300">{row.tax.toLocaleString()}</td>
-                  <td className="tbl-td font-mono text-white/50">{row.vat.toLocaleString()}</td>
+                  <td className="tbl-td font-mono text-blue-300">{row.electricity.toLocaleString()}</td>
+                  <td className="tbl-td font-mono text-amber-300">{row.gas.toLocaleString()}</td>
                   <td className="tbl-td font-mono text-white font-semibold">{row.total.toLocaleString()}</td>
                 </tr>
               ))}
@@ -425,52 +292,116 @@ function ProjectionsTab({ filters }: { filters: CostReportFilters }) {
         }
       >
         <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={projData} margin={{ top:5, right:20, left:-5, bottom:5 }}>
+          <BarChart data={monthlyData} margin={{ top:5, right:20, left:-5, bottom:5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
             <XAxis dataKey="month" tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-            <Tooltip contentStyle={TT} formatter={(v: number, n: string) => [`AED ${v.toLocaleString()}`, n]} />
-            <Legend wrapperStyle={{ fontSize:10 }} />
-            <Bar dataKey="elecCommodity" name="Elec Commodity"     stackId="c" fill="#3b82f6" opacity={0.85} />
-            <Bar dataKey="gasCommmodity" name="Gas Commodity"      stackId="c" fill="#f59e0b" opacity={0.85} />
-            <Bar dataKey="transport"     name="Transport/Network"  stackId="c" fill="#8b5cf6" opacity={0.85} />
-            <Bar dataKey="tax"           name="Tax"                stackId="c" fill="#ef4444" opacity={0.7} />
-            <Bar dataKey="vat"           name="VAT"                stackId="c" fill="#6b7280" opacity={0.7} radius={[3,3,0,0]} />
+            <YAxis tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false}
+              tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+            <Tooltip contentStyle={TT} formatter={(v: number, n: string) => [`${currencySymbol} ${v.toLocaleString()}`, n === 'electricity' ? 'Electricity' : 'Gas']} />
+            <Legend wrapperStyle={{ fontSize:10 }} formatter={v => v === 'electricity' ? 'Electricity' : 'Gas'} />
+            <Bar dataKey="electricity" name="electricity" stackId="a" fill="#3b82f6" opacity={0.85} radius={[0,0,0,0]} maxBarSize={32} />
+            <Bar dataKey="gas"         name="gas"         stackId="a" fill="#f59e0b" opacity={0.85} radius={[3,3,0,0]} maxBarSize={32} />
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
+
+      {siteCosts.length > 0 && (
+        <div className="card p-0 overflow-hidden">
+          <div className="px-5 py-3 border-b border-border-subtle">
+            <h2 className="section-title">Cost by Site</h2>
+          </div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border-subtle">
+                {['Site','Total Cost (AED)','% of Portfolio'].map(h => <th key={h} className="tbl-th">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {siteCosts.map((s, i) => (
+                <tr key={s.site} className={clsx('border-b border-border-subtle hover:bg-bg-card/50', i%2===0 ? 'bg-[#0d3d4a]/30' : '')}>
+                  <td className="tbl-td text-white/80 font-medium">{s.site}</td>
+                  <td className="tbl-td font-mono text-white/70 text-right">{s.cost.toLocaleString()}</td>
+                  <td className="tbl-td text-white/50 text-right">
+                    {totalCost > 0 ? ((s.cost / totalCost) * 100).toFixed(1) : 0}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
 
 // ─── Deviations tab ───────────────────────────────────────────────────────────
+function DeviationsTab({ tenantId, currencySymbol }: { tenantId: string; currencySymbol: string }) {
+  const [loading,  setLoading]  = useState(true)
+  const [monthly,  setMonthly]  = useState<any[]>([])
+  const [year,     setYear]     = useState(new Date().getFullYear())
 
-function DeviationsTab({ filters }: { filters: CostReportFilters }) {
-  const factor = 1 - filters.savings / 100
-  const meterFilter = (m: typeof METER_BUDGETS[0]) =>
-    filters.product === 'electricity' ? m.type === 'Electricity'
-    : filters.product === 'gas'       ? m.type === 'Gas'
-    : true
-  const filteredBudgets = METER_BUDGETS.filter(meterFilter)
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      // Fetch budgets and actuals for the year
+      const [budgetsRaw, recordsRaw] = await Promise.all([
+        supabase.from('budgets').select('*').eq('tenant_id', tenantId).eq('year', year),
+        fetchConsumption(tenantId, `${year}-01-01`),
+      ])
 
-  const monthlyData = MONTHS.map((month, i) => {
-    const budget = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_budget + mo.transport_budget + mo.tax_budget }, 0) * factor
-    const actual = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_actual + mo.transport_actual + mo.tax_actual }, 0) * factor
-    return { month, deviation: actual - budget, pct: budget > 0 ? ((actual - budget) / budget * 100) : 0 }
-  })
+      const budgetRows  = budgetsRaw.data ?? []
+      const MONTH_KEYS  = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'] as const
+
+      // Sum budgets per month
+      const budgetByMonth = MONTH_KEYS.map(k =>
+        budgetRows.reduce((a: number, b: any) => a + Number(b[k] ?? 0), 0)
+      )
+
+      // Sum actual costs per month
+      const actualByMonth = Array(12).fill(0)
+      for (const r of recordsRaw) {
+        const yr = r.period_start?.slice(0, 4)
+        if (String(yr) !== String(year)) continue
+        const mo = Number(r.period_start?.slice(5, 7) ?? 0) - 1
+        if (mo >= 0 && mo < 12) actualByMonth[mo] += Number(r.cost ?? 0)
+      }
+
+      const rows = MONTHS.map((month, i) => ({
+        month,
+        budget:    Math.round(budgetByMonth[i]),
+        actual:    Math.round(actualByMonth[i]),
+        deviation: Math.round(actualByMonth[i] - budgetByMonth[i]),
+        pct:       budgetByMonth[i] > 0 ? ((actualByMonth[i] - budgetByMonth[i]) / budgetByMonth[i] * 100) : 0,
+      }))
+
+      setMonthly(rows)
+      setLoading(false)
+    }
+    load()
+  }, [tenantId, year])
+
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 size={20} className="animate-spin text-white/30"/></div>
 
   return (
     <div className="space-y-5">
+      <div className="flex items-center gap-3 mb-2">
+        <select className="form-select text-sm" value={year} onChange={e => setYear(+e.target.value)}>
+          {[2023,2024,2025,2026].map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+
       <ChartCard
         title="Monthly Deviation vs Budget (AED)"
         subtitle="Green = under budget · Red = over budget"
         table={
           <table className="w-full">
-            <thead><tr>{['Month','Deviation (AED)','%'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
+            <thead><tr>{['Month','Budget (AED)','Actual (AED)','Deviation','%'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
             <tbody>
-              {monthlyData.map(row=>(
+              {monthly.map(row=>(
                 <tr key={row.month} className="tbl-row">
                   <td className="tbl-td text-white/70">{row.month}</td>
+                  <td className="tbl-td font-mono text-blue-300">{row.budget.toLocaleString()}</td>
+                  <td className="tbl-td font-mono text-white/70">{row.actual.toLocaleString()}</td>
                   <td className={clsx('tbl-td font-mono font-semibold', row.deviation>0?'text-danger-light':'text-success-light')}>
                     {row.deviation>0?'+':''}{row.deviation.toLocaleString()}
                   </td>
@@ -484,136 +415,64 @@ function DeviationsTab({ filters }: { filters: CostReportFilters }) {
         }
       >
         <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={monthlyData} margin={{ top:5, right:20, left:-5, bottom:5 }}>
+          <BarChart data={monthly} margin={{ top:5, right:20, left:-5, bottom:5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" />
             <XAxis dataKey="month" tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-            <Tooltip contentStyle={TT} formatter={(v: number) => [`AED ${v.toLocaleString()}`, 'Deviation']} />
+            <YAxis tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false}
+              tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+            <Tooltip contentStyle={TT} formatter={(v: number) => [`${currencySymbol} ${v.toLocaleString()}`, 'Deviation']} />
             <ReferenceLine y={0} stroke="#ffffff30" strokeWidth={1.5} />
             <Bar dataKey="deviation" name="Deviation" radius={[3,3,0,0]} maxBarSize={32}>
-              {monthlyData.map((d, i) => (
+              {monthly.map((d, i) => (
                 <Cell key={i} fill={d.deviation > 0 ? '#ef4444' : '#10b981'} opacity={0.85} />
               ))}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
-
-      <div className="card p-0 overflow-hidden">
-        <div className="px-5 py-3 border-b border-border-subtle"><h2 className="section-title">Monthly Deviation Detail</h2></div>
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-border-subtle">
-              {['Month','Budget (AED)','Actual (AED)','Deviation (AED)','Deviation %','Status'].map(h => (
-                <th key={h} className="tbl-th">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {MONTHS.map((month, i) => {
-              const budget = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_budget + mo.transport_budget + mo.tax_budget }, 0) * factor
-              const actual = filteredBudgets.reduce((s, m) => { const mo = m.monthly[i]; return s + mo.commodity_actual + mo.transport_actual + mo.tax_actual }, 0) * factor
-              const dev = actual - budget
-              const p = budget > 0 ? ((dev/budget)*100).toFixed(1) : '0'
-              return (
-                <tr key={month} className={clsx('border-b border-border-subtle hover:bg-bg-card/50', i%2===0 ? 'bg-[#0d3d4a]/30' : '')}>
-                  <td className="tbl-td text-white/70 font-medium">{month}</td>
-                  <td className="tbl-td font-mono text-white/60 text-right">{budget.toLocaleString()}</td>
-                  <td className="tbl-td font-mono text-white/70 text-right">{actual.toLocaleString()}</td>
-                  <td className={clsx('tbl-td font-mono font-semibold text-right', dev>0 ? 'text-danger-light' : 'text-success-light')}>
-                    {dev>0?'+':''}{dev.toLocaleString()}
-                  </td>
-                  <td className={clsx('tbl-td text-right text-[10px] font-semibold', dev>0 ? 'text-danger-light' : 'text-success-light')}>
-                    {dev>0?'+':''}{p}%
-                  </td>
-                  <td className="tbl-td">
-                    <span className={clsx('text-[10px] px-2 py-0.5 rounded-full font-medium',
-                      dev > 0.05*budget ? 'bg-danger/15 text-danger-light'
-                        : dev < -0.02*budget ? 'bg-success/15 text-success-light'
-                        : 'bg-white/10 text-white/50'
-                    )}>
-                      {dev > 0.05*budget ? 'Over budget' : dev < 0 ? 'Under budget' : 'On track'}
-                    </span>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
     </div>
   )
 }
 
 // ─── Cost Report tab ──────────────────────────────────────────────────────────
+function CostReportTab({ tenantId, currencySymbol }: { tenantId: string; currencySymbol: string }) {
+  const [loading, setLoading]  = useState(true)
+  const [chartData, setChart]  = useState<any[]>([])
+  const [yearTotal, setYearTotal] = useState(0)
 
-interface CostReportFilters {
-  product: 'electricity' | 'gas'
-  year: string
-  client: string
-  department: string
-  usageCat: string
-  usageType: string
-  costCenter: string
-  savings: number
-}
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      const records = await fetchConsumption(tenantId)
+      const monthly = groupByMonth(records)
 
-function CostReportTab({ filters, setFilters }: {
-  filters: CostReportFilters
-  setFilters: React.Dispatch<React.SetStateAction<CostReportFilters>>
-}) {
-  const factor = 1 - filters.savings / 100
-
-  // Build chart data: actuals for first ACTUAL_COUNT months, forecast for rest
-  const chartData = REPORT_MONTHS.map((m, i) => {
-    const isActual = i < ACTUAL_COUNT
-    const network   = Math.round(COST_NETWORK[i] * factor)
-    const entax     = Math.round(COST_ENTAX[i]   * factor)
-    const vat       = Math.round(COST_VAT[i]     * factor)
-    const supply    = Math.round(COST_SUPPLY[i]  * factor)
-    return {
-      month: `${m} ${filters.year}`,
-      // Actual series
-      vat:     isActual ? vat     : 0,
-      network: isActual ? network : 0,
-      supply:  isActual ? supply  : 0,
-      entax:   isActual ? entax   : 0,
-      // Forecast series
-      vat_v:     !isActual ? vat     : 0,
-      network_v: !isActual ? network : 0,
-      supply_v:  !isActual ? supply  : 0,
-      entax_v:   !isActual ? entax   : 0,
+      const data = monthly.map(m => ({
+        month:   new Date(m.month + '-01').toLocaleString('default', { month:'short', year:'2-digit' }),
+        cost:    Math.round(m.cost),
+        elec:    Math.round(m.cost * (m.elec / (m.elec + m.gas || 1))),
+        gas:     Math.round(m.cost * (m.gas  / (m.elec + m.gas || 1))),
+      }))
+      setChart(data)
+      setYearTotal(data.reduce((a, d) => a + d.cost, 0))
+      setLoading(false)
     }
-  })
+    load()
+  }, [tenantId])
 
-  const yearTotal = REPORT_MONTHS.reduce((sum, _, i) =>
-    sum + Math.round((COST_NETWORK[i] + COST_ENTAX[i] + COST_VAT[i] + COST_SUPPLY[i]) * factor), 0)
-
-  const SERIES = [
-    { key:'vat',     name:'VAT',                  color:'#ef4444' },
-    { key:'network', name:'Network',               color:'#06b6d4' },
-    { key:'supply',  name:'Supply',                color:'#10b981' },
-    { key:'entax',   name:'Energy Tax + ODE',      color:'#374151' },
-    { key:'vat_v',   name:'VAT (forecast)',         color:'#fca5a5' },
-    { key:'network_v',name:'Network (forecast)',    color:'#a5f3fc' },
-    { key:'supply_v', name:'Supply (forecast)',     color:'#6ee7b7' },
-    { key:'entax_v',  name:'Energy Tax (forecast)', color:'#9ca3af' },
-  ]
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 size={20} className="animate-spin text-white/30"/></div>
 
   return (
     <div className="space-y-5">
-      {/* Title breadcrumb */}
       <div>
         <div className="text-[11px] text-white/35 mb-0.5">Financial Reports</div>
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-white">Cost Forecast Report</h2>
+          <h2 className="text-base font-semibold text-white">Cost Report</h2>
           <button className="flex items-center gap-1.5 text-xs border border-border-default text-white/60 hover:text-white px-3 py-1.5 rounded-lg transition-all">
             <Download size={12} /> Download
           </button>
         </div>
       </div>
 
-      {/* Stacked bar chart */}
       <div className="card">
         <ResponsiveContainer width="100%" height={320}>
           <BarChart data={chartData} margin={{ top:5, right:10, left:-5, bottom:5 }}>
@@ -621,156 +480,77 @@ function CostReportTab({ filters, setFilters }: {
             <XAxis dataKey="month" tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false}
               tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-            <Tooltip
-              contentStyle={TT}
-              formatter={(v: number, name: string) => {
-                const s = SERIES.find(s => s.key === name)
-                return v > 0 ? [`AED ${v.toLocaleString()}`, s?.name ?? name] : null as unknown as [string, string]
-              }}
-            />
-            <Legend
-              wrapperStyle={{ fontSize:10, paddingTop:8 }}
-              formatter={(v: string) => SERIES.find(s => s.key === v)?.name ?? v}
-            />
-            {SERIES.map(s => (
-              <Bar key={s.key} dataKey={s.key} name={s.key} stackId="a"
-                fill={s.color} opacity={0.9}
-                radius={['entax','entax_v'].includes(s.key) ? [3,3,0,0] : [0,0,0,0]}
-                maxBarSize={40}
-              />
-            ))}
+            <Tooltip contentStyle={TT} formatter={(v: number, n: string) => [`${currencySymbol} ${v.toLocaleString()}`, n === 'elec' ? 'Electricity' : n === 'gas' ? 'Gas' : 'Total']} />
+            <Legend wrapperStyle={{ fontSize:10, paddingTop:8 }} formatter={v => v === 'elec' ? 'Electricity' : 'Gas'} />
+            <Bar dataKey="elec" name="elec" stackId="a" fill="#3b82f6" opacity={0.9} radius={[0,0,0,0]} maxBarSize={40} />
+            <Bar dataKey="gas"  name="gas"  stackId="a" fill="#f59e0b" opacity={0.9} radius={[3,3,0,0]} maxBarSize={40} />
           </BarChart>
         </ResponsiveContainer>
       </div>
 
-      {/* Monthly Consumption table */}
-      <div>
-        <div className="bg-accent px-4 py-2 rounded-t-lg">
-          <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Monthly Consumption (kWh)</h3>
-        </div>
-        <div className="card p-0 overflow-x-auto rounded-t-none border-t-0">
-          <table className="w-full text-[11px] min-w-[900px]">
-            <thead>
-              <tr className="border-b border-border-subtle">
-                <th className="tbl-th text-left w-24">Tariff</th>
-                {REPORT_MONTHS.map(m => <th key={m} className="tbl-th text-right">{m}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b border-border-subtle">
-                <td className="tbl-td font-semibold" style={{ color:'#10b981' }}>Normal</td>
-                {CON_NORMAL.map((v, i) => (
-                  <td key={i} className="tbl-td text-right font-semibold" style={{ color: i < ACTUAL_COUNT ? '#10b981' : '#6ee7b7' }}>
-                    {Math.round(v * factor).toLocaleString()}
-                  </td>
-                ))}
-              </tr>
-              <tr className="border-b border-border-subtle">
-                <td className="tbl-td text-white/70">Low</td>
-                {CON_LOW.map((v, i) => (
-                  <td key={i} className="tbl-td text-right text-white/60">
-                    {Math.round(v * factor).toLocaleString()}
-                  </td>
-                ))}
-              </tr>
-              <tr>
-                <td className="tbl-td font-semibold text-white/80">Total</td>
-                {CON_NORMAL.map((v, i) => (
-                  <td key={i} className="tbl-td text-right font-semibold text-white/80">
-                    {Math.round((v + CON_LOW[i]) * factor).toLocaleString()}
-                  </td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
+      <div className="card p-0 overflow-x-auto">
+        <table className="w-full text-[11px] min-w-[900px]">
+          <thead>
+            <tr className="border-b border-border-subtle">
+              <th className="tbl-th text-left w-32">Cost type</th>
+              {chartData.map(d => <th key={d.month} className="tbl-th text-right">{d.month}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="border-b border-border-subtle">
+              <td className="tbl-td font-semibold text-blue-300">Electricity</td>
+              {chartData.map((d, i) => <td key={i} className="tbl-td text-right text-blue-300">{d.elec.toLocaleString()}</td>)}
+            </tr>
+            <tr className="border-b border-border-subtle">
+              <td className="tbl-td font-semibold text-amber-300">Gas</td>
+              {chartData.map((d, i) => <td key={i} className="tbl-td text-right text-amber-300">{d.gas.toLocaleString()}</td>)}
+            </tr>
+            <tr className="border-b border-border-default bg-bg-card/40">
+              <td className="tbl-td font-bold text-white">Total</td>
+              {chartData.map((d, i) => <td key={i} className="tbl-td text-right font-bold text-white">{d.cost.toLocaleString()}</td>)}
+            </tr>
+            <tr className="bg-bg-secondary/60">
+              <td className="tbl-td font-semibold text-accent-hover">Period total</td>
+              <td className="tbl-td text-right font-bold text-accent-hover" colSpan={chartData.length}>
+                {currencySymbol} {yearTotal.toLocaleString()}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      {/* Monthly Costs table */}
-      <div>
-        <div className="bg-accent px-4 py-2 rounded-t-lg">
-          <h3 className="text-xs font-semibold text-white uppercase tracking-wider">Monthly Costs (AED)</h3>
-        </div>
-        <div className="card p-0 overflow-x-auto rounded-t-none border-t-0">
-          <table className="w-full text-[11px] min-w-[900px]">
-            <thead>
-              <tr className="border-b border-border-subtle">
-                <th className="tbl-th text-left w-36">Cost type</th>
-                {REPORT_MONTHS.map(m => <th key={m} className="tbl-th text-right">{m}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {[
-                { label: 'Normal',          values: Array(12).fill(0), color: '#10b981' },
-                { label: 'Low',             values: Array(12).fill(0), color: '#ffffff99' },
-                { label: 'Network',         values: COST_NETWORK,      color: '#06b6d4' },
-                { label: 'Energy Tax',      values: COST_ENTAX,        color: '#ffffff99' },
-                { label: 'VAT',             values: COST_VAT,          color: '#ef4444' },
-              ].map(({ label, values, color }) => (
-                <tr key={label} className="border-b border-border-subtle hover:bg-bg-card/30">
-                  <td className="tbl-td font-semibold" style={{ color }}>{label}</td>
-                  {values.map((v, i) => (
-                    <td key={i} className="tbl-td text-right" style={{ color: v === 0 ? '#ffffff33' : color }}>
-                      {v === 0 ? '0' : Math.round(v * factor).toLocaleString()}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-              <tr className="border-b border-border-default bg-bg-card/40">
-                <td className="tbl-td font-bold text-white">Total</td>
-                {REPORT_MONTHS.map((_, i) => (
-                  <td key={i} className="tbl-td text-right font-bold text-white">
-                    {Math.round((COST_NETWORK[i] + COST_ENTAX[i] + COST_VAT[i] + COST_SUPPLY[i]) * factor).toLocaleString()}
-                  </td>
-                ))}
-              </tr>
-              <tr className="bg-bg-secondary/60">
-                <td className="tbl-td font-semibold text-accent-hover">Year total</td>
-                <td className="tbl-td text-right font-bold text-accent-hover" colSpan={12}>
-                  AED {yearTotal.toLocaleString()}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Report conditions notice */}
       <div className="text-[10px] text-white/30 leading-relaxed border border-border-subtle rounded-lg p-3 space-y-0.5">
-        <div>· Forecasts are based on consumption from previous years</div>
-        <div>· Network costs are calculated only for fully registered connections</div>
-        <div>· Supply costs are based on supplier contracts</div>
-        <div>· Energy tax is calculated based on tax clusters</div>
+        <div>· Data sourced directly from consumption_records table</div>
+        <div>· Electricity/Gas cost split is proportional to kWh vs m³ consumption volumes</div>
+        <div>· Import additional records via the Analytics page</div>
       </div>
     </div>
   )
 }
 
-// ─── Cost Report sidebar ──────────────────────────────────────────────────────
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+interface SidebarFilters { product: 'electricity' | 'gas'; year: string; savings: number }
 
-function CostReportSidebar({ filters, setFilters }: {
-  filters: CostReportFilters
-  setFilters: React.Dispatch<React.SetStateAction<CostReportFilters>>
+function Sidebar({ filters, setFilters }: {
+  filters: SidebarFilters
+  setFilters: React.Dispatch<React.SetStateAction<SidebarFilters>>
 }) {
-  const set = <K extends keyof CostReportFilters>(key: K) => (val: CostReportFilters[K]) =>
+  const set = <K extends keyof SidebarFilters>(key: K) => (val: SidebarFilters[K]) =>
     setFilters(f => ({ ...f, [key]: val }))
 
   return (
     <aside className="w-[220px] min-w-[220px] bg-bg-secondary border-r border-border-subtle flex flex-col overflow-y-auto">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
-        <span className="text-sm font-semibold text-white">Search filter</span>
+        <span className="text-sm font-semibold text-white">Filters</span>
         <button
-          onClick={() => setFilters({ product:'electricity', year:'2026', client:'', department:'', usageCat:'', usageType:'', costCenter:'', savings:0 })}
+          onClick={() => setFilters({ product:'electricity', year:'2026', savings:0 })}
           className="text-white/30 hover:text-white/70 transition-colors"
-          title="Reset filters"
-        >
+          title="Reset filters">
           <RefreshCw size={13} />
         </button>
       </div>
 
       <div className="px-4 py-4 flex-1 space-y-5">
-
-        {/* Product */}
         <div>
           <div className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest mb-2 pb-1 border-b border-border-subtle">Product</div>
           {(['electricity','gas'] as const).map(p => (
@@ -784,69 +564,14 @@ function CostReportSidebar({ filters, setFilters }: {
           ))}
         </div>
 
-        {/* Period */}
         <div>
           <div className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest mb-2 pb-1 border-b border-border-subtle">Period</div>
           <select value={filters.year} onChange={e => set('year')(e.target.value)}
             className="w-full bg-bg-card border border-border-subtle text-white/70 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent">
-            {['2024','2025','2026','2027'].map(y => <option key={y}>{y}</option>)}
+            {['2023','2024','2025','2026','2027'].map(y => <option key={y}>{y}</option>)}
           </select>
         </div>
 
-        {/* Client */}
-        <div>
-          <div className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest mb-2 pb-1 border-b border-border-subtle">Client</div>
-          <div className="text-[11px] text-white/40 mb-1">Client</div>
-          <select value={filters.client} onChange={e => set('client')(e.target.value)}
-            className="w-full bg-bg-card border border-border-subtle text-white/70 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent mb-2">
-            <option value="">All clients</option>
-            <option>Masdar City Group</option>
-            <option>DEWA</option>
-          </select>
-          <div className="text-[11px] text-white/40 mb-1">Department</div>
-          <select value={filters.department} onChange={e => set('department')(e.target.value)}
-            className="w-full bg-bg-card border border-border-subtle text-white/70 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent">
-            <option value="">All departments</option>
-            <option>Real Estate</option>
-            <option>Operations</option>
-            <option>Construction</option>
-          </select>
-        </div>
-
-        {/* Object */}
-        <div>
-          <div className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest mb-2 pb-1 border-b border-border-subtle">Object</div>
-          <div className="text-[11px] text-white/40 mb-1">Usage category</div>
-          <select value={filters.usageCat} onChange={e => set('usageCat')(e.target.value)}
-            className="w-full bg-bg-card border border-border-subtle text-white/70 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent mb-2">
-            <option value="">Select</option>
-            <option>Office</option>
-            <option>Industrial</option>
-            <option>Residential</option>
-          </select>
-          <div className="text-[11px] text-white/40 mb-1">Usage type</div>
-          <select value={filters.usageType} onChange={e => set('usageType')(e.target.value)}
-            className="w-full bg-bg-card border border-border-subtle text-white/70 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent">
-            <option value="">Select</option>
-            <option>Standard</option>
-            <option>Large user</option>
-          </select>
-        </div>
-
-        {/* Other */}
-        <div>
-          <div className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest mb-2 pb-1 border-b border-border-subtle">Other</div>
-          <div className="text-[11px] text-white/40 mb-1">Cost center</div>
-          <div className="text-xs text-white/50 py-1 mb-2 border-b border-border-subtle">All cost centers</div>
-          <div className="text-[11px] text-white/40 mb-1">Tax cluster</div>
-          <select className="w-full bg-bg-card border border-border-subtle text-white/70 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-accent">
-            <option value="">Select</option>
-            <option>VAT-5</option>
-            <option>VAT-0</option>
-          </select>
-        </div>
-
-        {/* Savings */}
         <div>
           <div className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest mb-2 pb-1 border-b border-border-subtle">Savings</div>
           <div className="text-[11px] text-white/40 mb-1">Savings (%)</div>
@@ -858,42 +583,34 @@ function CostReportSidebar({ filters, setFilters }: {
           />
           {filters.savings > 0 && (
             <div className="mt-1.5 text-[10px] text-success-light">
-              Applying {filters.savings}% saving factor to all costs
+              Applying {filters.savings}% saving factor
             </div>
           )}
         </div>
-      </div>
-
-      {/* Download */}
-      <div className="p-3 border-t border-border-subtle">
-        <button className="w-full btn-secondary text-xs py-2 flex items-center justify-center gap-1.5">
-          <Download size={12} /> Download report
-        </button>
       </div>
     </aside>
   )
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
-
 export default function Financials() {
+  const { market } = useAppStore()
+  const cfg        = MARKET_CONFIGS[market]
+  const tenantId   = useTenantId()
+
   const [tab, setTab] = useState<Tab>('tariffs')
-  const [costFilters, setCostFilters] = useState<CostReportFilters>({
-    product: 'electricity', year: '2026', client: '', department: '',
-    usageCat: '', usageType: '', costCenter: '', savings: 0,
+  const [filters, setFilters] = useState<SidebarFilters>({
+    product: 'electricity', year: '2026', savings: 0,
   })
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <Topbar title="Financials" subtitle="Tariffs · budget · projections · deviations" />
+      <Topbar title="Financials" subtitle="Tariffs · costs · deviations · reports" />
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Persistent filter sidebar */}
-        <CostReportSidebar filters={costFilters} setFilters={setCostFilters} />
+        <Sidebar filters={filters} setFilters={setFilters} />
 
-        {/* Right: tabs + content */}
         <div className="flex flex-col flex-1 overflow-hidden">
-          {/* Tabs row */}
           <div className="flex-shrink-0 px-6 pt-4 pb-0 border-b border-border-subtle">
             <div className="flex items-center gap-1 bg-bg-secondary border border-border-subtle rounded-xl p-1 w-fit mb-4">
               {TABS.map(t => (
@@ -908,13 +625,11 @@ export default function Financials() {
             </div>
           </div>
 
-          {/* Tab content */}
           <div className="flex-1 overflow-y-auto p-6">
-            {tab === 'tariffs'     && <TariffsTab />}
-            {tab === 'budget'      && <BudgetTab      filters={costFilters} />}
-            {tab === 'projections' && <ProjectionsTab filters={costFilters} />}
-            {tab === 'deviations'  && <DeviationsTab  filters={costFilters} />}
-            {tab === 'cost-report' && <CostReportTab  filters={costFilters} setFilters={setCostFilters} />}
+            {tab === 'tariffs'      && <TariffsTab     tenantId={tenantId} />}
+            {tab === 'cost-summary' && <CostSummaryTab tenantId={tenantId} currencySymbol={cfg.currencySymbol} />}
+            {tab === 'deviations'   && <DeviationsTab  tenantId={tenantId} currencySymbol={cfg.currencySymbol} />}
+            {tab === 'cost-report'  && <CostReportTab  tenantId={tenantId} currencySymbol={cfg.currencySymbol} />}
           </div>
         </div>
       </div>
