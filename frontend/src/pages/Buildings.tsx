@@ -4,9 +4,8 @@ import { Topbar } from '@/components/layout/Topbar'
 import {
   Hotel, MapPin, Zap, Flame, Leaf, Award, ChevronRight, ChevronDown,
   BarChart3, Users, Thermometer, Droplets, Wind, ArrowLeft,
-  Building2, Table, Link2, Activity, Plus,
+  Building2, Table, Link2, Activity, Plus, Search, X as XIcon,
 } from 'lucide-react'
-import AddConnectionPanel from '@/components/connections/AddConnectionPanel'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
@@ -256,6 +255,100 @@ const PRODUCT_COLOR: Record<string, string> = {
 }
 const PRODUCT_ICON: Record<string, React.ElementType> = {
   Electricity: Zap, Gas: Flame, Water: Droplets,
+}
+
+// ─── Link existing connection picker ─────────────────────────────────────────
+function LinkConnectionPicker({
+  buildingName, tenantId, onDone,
+}: { buildingName: string; tenantId: string; onDone: () => void }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<DBConnection[]>([])
+  const [linking, setLinking] = useState<string | null>(null)
+  const [linked, setLinked] = useState<string[]>([])
+
+  useEffect(() => {
+    if (query.trim().length < 2) { setResults([]); return }
+    const q = query.trim().toLowerCase()
+    supabase
+      .from('energy_connections')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .or(`ean_code.ilike.%${q}%,meter_number.ilike.%${q}%,address.ilike.%${q}%,site_name.ilike.%${q}%`)
+      .limit(10)
+      .then(({ data }) => setResults(data ?? []))
+  }, [query, tenantId])
+
+  async function link(conn: DBConnection) {
+    setLinking(conn.id)
+    await supabase
+      .from('energy_connections')
+      .update({ building_name: buildingName })
+      .eq('id', conn.id)
+    setLinked(prev => [...prev, conn.id])
+    setLinking(null)
+  }
+
+  return (
+    <div className="card space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Search size={13} className="text-accent" />
+          <span className="text-xs font-semibold text-white/60 uppercase tracking-widest">Link Existing Connection</span>
+        </div>
+        <button onClick={onDone} className="text-white/30 hover:text-white/60 transition-colors"><XIcon size={14} /></button>
+      </div>
+      <div className="relative">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" />
+        <input
+          autoFocus
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Type EAN code, meter number or address…"
+          className="form-input w-full pl-8 text-sm"
+        />
+      </div>
+      {query.trim().length >= 2 && results.length === 0 && (
+        <p className="text-xs text-white/30 text-center py-2">No connections found</p>
+      )}
+      {results.map(c => {
+        const done = linked.includes(c.id)
+        const busy = linking === c.id
+        const Icon = c.connection_type?.toLowerCase().includes('gas') ? Flame : Zap
+        const color = c.connection_type?.toLowerCase().includes('gas') ? '#f59e0b' : '#10b981'
+        return (
+          <div key={c.id} className="flex items-center gap-3 p-3 rounded-xl bg-bg-secondary border border-border-subtle">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: color + '20' }}>
+              <Icon size={13} style={{ color }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-white/80 font-medium truncate">{c.site_name ?? c.address ?? c.id}</div>
+              <div className="text-[11px] text-white/35 font-mono mt-0.5">
+                {[c.ean_code, c.meter_number, c.address].filter(Boolean).join(' · ')}
+              </div>
+              {c.building_name && (
+                <div className="text-[10px] text-amber-400/70 mt-0.5">Currently linked to: {c.building_name}</div>
+              )}
+            </div>
+            <button
+              disabled={done || busy}
+              onClick={() => link(c)}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors flex-shrink-0 ${
+                done ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10 cursor-default'
+                     : 'border-accent/30 text-accent hover:border-accent hover:bg-accent/10'
+              }`}
+            >
+              {busy ? '…' : done ? 'Linked ✓' : 'Link'}
+            </button>
+          </div>
+        )
+      })}
+      {linked.length > 0 && (
+        <button onClick={onDone} className="w-full text-xs text-white/50 hover:text-white/80 border border-border-subtle rounded-lg py-2 transition-colors">
+          Done — refresh page to see linked connections
+        </button>
+      )}
+    </div>
+  )
 }
 
 // ─── Building connections section (DB-driven) ─────────────────────────────────
@@ -525,29 +618,31 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
           </ResponsiveContainer>
         </div>
 
-        {/* Connections section with Add button */}
+        {/* Connections section with Link button */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Link2 size={14} className="text-accent" />
               <span className="text-xs font-semibold text-white/60 uppercase tracking-widest">Connections & Meters</span>
             </div>
-            <button onClick={() => setShowAddConn(true)}
-              className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover border border-accent/30 hover:border-accent/60 px-3 py-1.5 rounded-lg transition-colors">
-              <Plus size={12} /> Add Connection
-            </button>
+            {!showAddConn && (
+              <button onClick={() => setShowAddConn(true)}
+                className="flex items-center gap-1.5 text-xs text-accent hover:text-accent-hover border border-accent/30 hover:border-accent/60 px-3 py-1.5 rounded-lg transition-colors">
+                <Plus size={12} /> Link Connection
+              </button>
+            )}
           </div>
+          {showAddConn && (
+            <div className="mb-4">
+              <LinkConnectionPicker
+                buildingName={building.name}
+                tenantId={tenantId}
+                onDone={() => setShowAddConn(false)}
+              />
+            </div>
+          )}
           <BuildingConnectionsSection siteId={building.site_id} />
         </div>
-
-        {showAddConn && (
-          <AddConnectionPanel
-            defaultSiteId={building.site_id}
-            defaultBuildingName={building.name}
-            onClose={() => setShowAddConn(false)}
-            onSave={() => setShowAddConn(false)}
-          />
-        )}
 
         {showTable && (
           <div className="card p-0 overflow-hidden">
