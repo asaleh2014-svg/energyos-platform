@@ -567,10 +567,11 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
 }
 
 // ─── Building row (list view) ─────────────────────────────────────────────────
-function BuildingRow({ building, connections }: { building: DBBuilding; connections: DBConnection[] }) {
+function BuildingRow({ building, connections, elecKwh }: { building: DBBuilding; connections: DBConnection[]; elecKwh: number }) {
   const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
   const area = building.area_m2 ?? 1
+  const eui = area > 0 && elecKwh > 0 ? (elecKwh / area).toFixed(1) : null
 
   return (
     <>
@@ -596,7 +597,9 @@ function BuildingRow({ building, connections }: { building: DBBuilding; connecti
         </td>
         <td className="tbl-td text-right font-mono text-white/60">{building.area_m2 ? `${building.area_m2.toLocaleString()} m²` : '—'}</td>
         <td className="tbl-td text-center"><LabelBadge label={building.energy_label} /></td>
-        <td className="tbl-td text-right font-mono text-white/50">{area > 0 ? `— kWh/m²` : '—'}</td>
+        <td className="tbl-td text-right font-mono" style={{ color: eui ? euiColor(+eui, DEFAULT_BENCHMARK) : undefined }}>
+          {eui ? `${eui} kWh/m²` : '—'}
+        </td>
         <td className="tbl-td text-white/50">{building.breeam_rating ?? '—'}</td>
         <td className="tbl-td text-white/50">{building.leed_rating ?? '—'}</td>
         <td className="tbl-td text-center text-white/50">{connections.length}</td>
@@ -669,6 +672,7 @@ function BuildingList() {
 
   const [buildings, setBuildings] = useState<DBBuilding[]>([])
   const [connectionsBySite, setConnectionsBySite] = useState<Record<string, DBConnection[]>>({})
+  const [consumptionBySite, setConsumptionBySite] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -682,18 +686,40 @@ function BuildingList() {
       const { data: bldgs } = await query
       setBuildings(bldgs ?? [])
 
-      // Load all connections for the tenant grouped by site_id
+      // Load all connections grouped by site_id
       const { data: conns } = await supabase
         .from('energy_connections')
         .select('*')
         .eq('tenant_id', tenantId)
       const grouped: Record<string, DBConnection[]> = {}
+      const connToSite: Record<string, string> = {}
       for (const c of (conns ?? [])) {
         if (!c.site_id) continue
         if (!grouped[c.site_id]) grouped[c.site_id] = []
         grouped[c.site_id].push(c)
+        connToSite[c.id] = c.site_id
       }
       setConnectionsBySite(grouped)
+
+      // Fetch all electricity consumption and sum by site
+      const connIds = Object.keys(connToSite)
+      if (connIds.length > 0) {
+        const { data: recs } = await supabase
+          .from('consumption_records')
+          .select('connection_id, consumption, unit')
+          .eq('tenant_id', tenantId)
+          .in('connection_id', connIds)
+        const bySite: Record<string, number> = {}
+        for (const r of (recs ?? [])) {
+          const sId = connToSite[r.connection_id]
+          if (!sId) continue
+          // Only count kWh (electricity); skip m³ gas for EUI
+          if (r.unit && r.unit.toLowerCase().includes('m')) continue
+          bySite[sId] = (bySite[sId] ?? 0) + (r.consumption ?? 0)
+        }
+        setConsumptionBySite(bySite)
+      }
+
       setLoading(false)
     }
     load()
@@ -708,12 +734,11 @@ function BuildingList() {
 
   const totalArea = filtered.reduce((a, b) => a + (b.area_m2 ?? 0), 0)
 
-  // For benchmarking, build synthetic BenchmarkBuilding from DB buildings + 0 elec (no consumption pre-loaded here)
   const benchmarkBuildings: BenchmarkBuilding[] = filtered.map(b => ({
     id: b.id,
     name: b.name,
     area_m2: b.area_m2 ?? 1,
-    elec_kwh_year: 0, // Would need consumption_records aggregation; zero for now
+    elec_kwh_year: consumptionBySite[b.site_id] ?? 0,
     energy_label: (b.energy_label ?? 'C') as EnergyLabel,
   }))
 
@@ -782,7 +807,7 @@ function BuildingList() {
               </thead>
               <tbody>
                 {filtered.map(b => (
-                  <BuildingRow key={b.id} building={b} connections={connectionsBySite[b.site_id] ?? []} />
+                  <BuildingRow key={b.id} building={b} connections={connectionsBySite[b.site_id] ?? []} elecKwh={consumptionBySite[b.site_id] ?? 0} />
                 ))}
                 {filtered.length === 0 && (
                   <tr><td colSpan={10} className="tbl-td text-center text-white/30 py-8">No buildings match</td></tr>
