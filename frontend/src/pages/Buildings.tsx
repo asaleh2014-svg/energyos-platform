@@ -128,7 +128,7 @@ function BenchmarkingView({ buildings }: { buildings: BenchmarkBuilding[] }) {
         <div className="flex items-center gap-2">
           <span className="text-xs text-white/40 uppercase tracking-widest">Building type</span>
           <select value={sector} onChange={e => setSector(e.target.value)}
-            className="input text-xs py-1.5 px-3">
+            className="form-select text-xs py-1.5 px-3 w-auto">
             {Object.keys(UAE_BENCHMARKS).map(s => <option key={s}>{s}</option>)}
           </select>
         </div>
@@ -780,7 +780,7 @@ function BuildingList() {
               placeholder="Search buildings or addresses…" className="input w-full pl-8" />
             <MapPin size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" />
           </div>
-          <select value={labelFilter} onChange={e => setLabelFilter(e.target.value as EnergyLabel | '')} className="input">
+          <select value={labelFilter} onChange={e => setLabelFilter(e.target.value as EnergyLabel | '')} className="form-select w-auto">
             <option value="">All energy labels</option>
             {ENERGY_LABELS.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
