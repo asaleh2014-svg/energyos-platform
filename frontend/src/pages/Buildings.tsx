@@ -2,16 +2,16 @@ import { useState, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
 import {
-  Hotel, MapPin, Zap, Flame, Leaf, Award, ChevronRight,
+  Hotel, MapPin, Zap, Flame, Leaf, Award, ChevronRight, ChevronDown,
   BarChart3, Users, Thermometer, Droplets, Wind, ArrowLeft,
-  Building2, Table,
+  Building2, Table, Link2, Activity,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend,
 } from 'recharts'
 import {
-  mockBuildingsForSite, buildingMonthly,
+  mockBuildingsForSite, buildingMonthly, buildingConnections,
   LABEL_COLORS, ENERGY_LABELS, type MockBuilding, type EnergyLabel,
 } from '@/lib/buildingMocks'
 import { PeriodSelector, DEFAULT_PERIOD, type Period } from '@/components/PeriodSelector'
@@ -193,6 +193,70 @@ function LabelBadge({ label }: { label: EnergyLabel }) {
   )
 }
 
+const PRODUCT_COLOR: Record<string, string> = {
+  Electricity: '#10b981', Gas: '#f59e0b', Water: '#3b82f6',
+}
+const PRODUCT_ICON: Record<string, React.ElementType> = {
+  Electricity: Zap, Gas: Flame, Water: Droplets,
+}
+
+function BuildingConnectionsSection({ building }: { building: MockBuilding }) {
+  const navigate = useNavigate()
+  const conns = useMemo(() => buildingConnections(building), [building.id])
+
+  if (conns.length === 0) return null
+
+  return (
+    <div className="card">
+      <div className="flex items-center gap-2 mb-4">
+        <Link2 size={14} className="text-accent" />
+        <span className="text-xs font-semibold text-white/60 uppercase tracking-widest">
+          Connections & Meters
+        </span>
+        <span className="ml-auto text-xs text-white/30">{conns.length} connection{conns.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div className="space-y-2">
+        {conns.map(c => {
+          const color = PRODUCT_COLOR[c.product] ?? '#6b7280'
+          const Icon  = PRODUCT_ICON[c.product] ?? Zap
+          return (
+            <button
+              key={c.id}
+              onClick={() => navigate(`/connections?conn=${c.id}`)}
+              className="w-full flex items-center gap-3 p-3 rounded-xl bg-bg-secondary border border-border-subtle hover:border-accent/40 hover:bg-accent/5 transition-all group text-left"
+            >
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: color + '20' }}>
+                <Icon size={14} style={{ color }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-white/80 font-medium group-hover:text-accent-hover transition-colors truncate">
+                  {c.name}
+                </div>
+                <div className="flex items-center gap-2 mt-0.5 text-[11px] text-white/35">
+                  <span className="font-mono">{c.ean_code}</span>
+                  <span>·</span>
+                  <span>{c.connection_type}</span>
+                  <span>·</span>
+                  <span>{c.meter_number}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className={`status-${c.status.toLowerCase()}`}>{c.status}</span>
+                <div className="flex items-center gap-1 text-[11px] text-white/30">
+                  <Activity size={10} />
+                  <span>{((c.usage_normal + c.usage_low) / 1000).toFixed(0)}K kWh/yr</span>
+                </div>
+                <ChevronRight size={13} className="text-white/20 group-hover:text-accent transition-colors" />
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function BuildingDetail({ building }: { building: MockBuilding }) {
   const navigate = useNavigate()
   const [period, setPeriod]     = useState<Period>(DEFAULT_PERIOD)
@@ -314,6 +378,8 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
           </ResponsiveContainer>
         </div>
 
+        <BuildingConnectionsSection building={building} />
+
         {showTable && (
           <div className="card p-0 overflow-hidden">
             <table className="w-full text-[12px]">
@@ -357,35 +423,93 @@ function BuildingDetail({ building }: { building: MockBuilding }) {
 
 function BuildingRow({ building }: { building: MockBuilding }) {
   const navigate = useNavigate()
+  const [expanded, setExpanded] = useState(false)
   const eff = (building.elec_kwh_year / building.area_m2).toFixed(1)
   const effColor = Number(eff) < 100 ? '#10b981' : Number(eff) < 200 ? '#f59e0b' : '#ef4444'
+  const conns = useMemo(() => buildingConnections(building), [building.id])
 
   return (
-    <tr className="tbl-row cursor-pointer group" onClick={() => navigate(`/buildings/${building.id}`)}>
-      <td className="tbl-td">
-        <div className="flex items-center gap-2">
-          <Hotel size={13} className="text-accent flex-shrink-0" />
-          <div>
-            <div className="text-white/80 font-medium group-hover:text-accent-hover transition-colors">{building.name}</div>
-            <div className="text-[10px] text-white/35 flex items-center gap-1 mt-0.5">
-              <MapPin size={8} /> {building.address}
+    <>
+      <tr className="tbl-row group">
+        {/* Expand toggle */}
+        <td className="tbl-td w-8 pr-0">
+          <button
+            onClick={e => { e.stopPropagation(); setExpanded(v => !v) }}
+            className="w-6 h-6 flex items-center justify-center rounded hover:bg-accent/10 transition-colors"
+          >
+            <ChevronDown size={12} className={`text-white/30 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+        </td>
+        <td className="tbl-td cursor-pointer" onClick={() => navigate(`/buildings/${building.id}`)}>
+          <div className="flex items-center gap-2">
+            <Hotel size={13} className="text-accent flex-shrink-0" />
+            <div>
+              <div className="text-white/80 font-medium group-hover:text-accent-hover transition-colors">{building.name}</div>
+              <div className="text-[10px] text-white/35 flex items-center gap-1 mt-0.5">
+                <MapPin size={8} /> {building.address}
+              </div>
             </div>
           </div>
-        </div>
-      </td>
-      <td className="tbl-td text-right font-mono text-white/60">{building.area_m2.toLocaleString()} m²</td>
-      <td className="tbl-td text-center"><LabelBadge label={building.energy_label} /></td>
-      <td className="tbl-td text-right font-mono" style={{ color: effColor }}>{eff} kWh/m²</td>
-      <td className="tbl-td text-right font-mono text-blue-300">{(building.elec_kwh_year/1000).toFixed(0)}K kWh</td>
-      <td className="tbl-td text-right font-mono text-amber-300">{building.gas_m3_year.toLocaleString()} m³</td>
-      <td className="tbl-td text-white/50">{building.breeam}</td>
-      <td className="tbl-td text-white/50">{building.leed}</td>
-      <td className="tbl-td text-center text-white/50">{building.meter_count}</td>
-      <td className="tbl-td"><span className={`status-${building.status.toLowerCase().replace(' ', '-')}`}>{building.status}</span></td>
-      <td className="tbl-td text-right">
-        <ChevronRight size={14} className="text-white/20 group-hover:text-accent transition-colors ml-auto" />
-      </td>
-    </tr>
+        </td>
+        <td className="tbl-td text-right font-mono text-white/60">{building.area_m2.toLocaleString()} m²</td>
+        <td className="tbl-td text-center"><LabelBadge label={building.energy_label} /></td>
+        <td className="tbl-td text-right font-mono" style={{ color: effColor }}>{eff} kWh/m²</td>
+        <td className="tbl-td text-right font-mono text-blue-300">{(building.elec_kwh_year/1000).toFixed(0)}K kWh</td>
+        <td className="tbl-td text-right font-mono text-amber-300">{building.gas_m3_year.toLocaleString()} m³</td>
+        <td className="tbl-td text-white/50">{building.breeam}</td>
+        <td className="tbl-td text-white/50">{building.leed}</td>
+        <td className="tbl-td text-center text-white/50">{building.meter_count}</td>
+        <td className="tbl-td"><span className={`status-${building.status.toLowerCase().replace(' ', '-')}`}>{building.status}</span></td>
+        <td className="tbl-td text-right">
+          <ChevronRight size={14} className="text-white/20 group-hover:text-accent transition-colors ml-auto cursor-pointer"
+            onClick={() => navigate(`/buildings/${building.id}`)} />
+        </td>
+      </tr>
+
+      {/* Expanded connections rows */}
+      {expanded && (
+        <tr>
+          <td colSpan={12} className="px-4 pb-3 bg-bg-secondary/40 border-b border-border-subtle">
+            <div className="pt-2 space-y-1.5">
+              <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                <Link2 size={9} /> Connections & Meters
+              </div>
+              {conns.map(c => {
+                const color = PRODUCT_COLOR[c.product] ?? '#6b7280'
+                const Icon  = PRODUCT_ICON[c.product] ?? Zap
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => navigate(`/connections?conn=${c.id}`)}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-bg-card border border-border-subtle hover:border-accent/40 hover:bg-accent/5 transition-all group/conn text-left"
+                  >
+                    <div className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0"
+                      style={{ background: color + '20' }}>
+                      <Icon size={11} style={{ color }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs text-white/75 font-medium group-hover/conn:text-accent-hover transition-colors">
+                        {c.name}
+                      </span>
+                      <span className="text-[11px] text-white/30 font-mono ml-2">{c.ean_code}</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] text-white/35 flex-shrink-0">
+                      <span>{c.connection_type}</span>
+                      <span className="font-mono text-white/25">{c.meter_number}</span>
+                      <span className={`status-${c.status.toLowerCase()}`}>{c.status}</span>
+                      <ChevronRight size={11} className="text-white/20 group-hover/conn:text-accent" />
+                    </div>
+                  </button>
+                )
+              })}
+              {conns.length === 0 && (
+                <div className="text-xs text-white/25 py-2">No connections linked</div>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
@@ -459,6 +583,7 @@ function BuildingList() {
           <table className="w-full text-[12px]">
             <thead>
               <tr className="border-b border-border-subtle">
+                <th className="tbl-th w-8" />
                 <th className="tbl-th">Building</th>
                 <th className="tbl-th text-right">Area</th>
                 <th className="tbl-th text-center">Label</th>
@@ -475,7 +600,7 @@ function BuildingList() {
             <tbody>
               {filtered.map(b => <BuildingRow key={b.id} building={b} />)}
               {filtered.length === 0 && (
-                <tr><td colSpan={11} className="tbl-td text-center text-white/30 py-8">No buildings match</td></tr>
+                <tr><td colSpan={12} className="tbl-td text-center text-white/30 py-8">No buildings match</td></tr>
               )}
             </tbody>
           </table>

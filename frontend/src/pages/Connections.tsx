@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
+import { useSearchParams } from 'react-router-dom'
 import {
   Download, RefreshCw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   X, List, Map as MapIcon, Zap, Flame, Droplets,
@@ -219,13 +220,23 @@ export default function Connections() {
   const [selected, setSelected]   = useState<FullConnection | null>(null)
   const [adding,   setAdding]     = useState(false)
   const [extraConns, setExtraConns] = useState<FullConnection[]>([])
+  const [searchParams] = useSearchParams()
+
+  const allConnections = useMemo(() => [...FULL_CONNECTIONS, ...extraConns], [extraConns])
+
+  // Auto-open connection from ?conn=<id> (e.g. navigated from Buildings)
+  useEffect(() => {
+    const connId = searchParams.get('conn')
+    if (connId) {
+      const found = allConnections.find(c => c.id === connId)
+      if (found) setSelected(found)
+    }
+  }, [searchParams, allConnections])
 
   const set = (key: keyof Filters) => (val: string) => {
     setFilters(f => ({ ...f, [key]: val })); setPage(1)
   }
   const reset = () => { setFilters(EMPTY); setPage(1) }
-
-  const allConnections = useMemo(() => [...FULL_CONNECTIONS, ...extraConns], [extraConns])
 
   const filtered = useMemo(() => allConnections.filter(c => {
     if (filters.ean       && !c.ean_code.toLowerCase().includes(filters.ean.toLowerCase()) &&

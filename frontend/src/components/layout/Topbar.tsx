@@ -34,7 +34,10 @@ export function Topbar({ title, subtitle, actions }: TopbarProps) {
           AI Audit
         </button>
 
-        <button className="relative text-white/40 hover:text-white/70 transition-colors p-1.5">
+        <button
+          onClick={() => navigate('/alerts')}
+          className="relative text-white/40 hover:text-white/70 transition-colors p-1.5"
+        >
           <Bell size={16} />
           <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-danger rounded-full" />
         </button>

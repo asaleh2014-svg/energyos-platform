@@ -1,3 +1,4 @@
+import { FULL_CONNECTIONS, type FullConnection } from '@/lib/connectionsData'
 import { MONTHS } from '@/lib/mockData'
 import type { Period } from '@/components/PeriodSelector'
 
@@ -82,6 +83,18 @@ export function mockBuildingsForSite(siteId: string, count = 3): MockBuilding[] 
       status:        seededItem(['Active', 'Active', 'Active', 'Inactive', 'Under Review'] as const, seed),
     }
   })
+}
+
+export function buildingConnections(building: MockBuilding): FullConnection[] {
+  const seed = building.id.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
+  const count = Math.min(building.meter_count, 4)
+  const seen = new Set<string>()
+  const result: FullConnection[] = []
+  for (let i = 0; i < count; i++) {
+    const conn = FULL_CONNECTIONS[(seed + i * 7) % FULL_CONNECTIONS.length]
+    if (!seen.has(conn.id)) { seen.add(conn.id); result.push(conn) }
+  }
+  return result
 }
 
 export function buildingMonthly(b: MockBuilding, period?: Period) {
