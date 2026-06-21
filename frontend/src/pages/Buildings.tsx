@@ -777,7 +777,7 @@ function BuildingList() {
         <div className="flex items-center gap-3 flex-wrap">
           <div className="relative flex-1 min-w-48">
             <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search buildings or addresses…" className="input w-full pl-8" />
+              placeholder="Search buildings or addresses…" className="form-input w-full pl-8" />
             <MapPin size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" />
           </div>
           <select value={labelFilter} onChange={e => setLabelFilter(e.target.value as EnergyLabel | '')} className="form-select w-auto">
