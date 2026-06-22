@@ -51,6 +51,7 @@ interface DBConnection {
   supplier: string | null
   grid_operator: string | null
   building_name: string | null
+  building_id: string | null
   address: string | null
   latitude: number | null
   longitude: number | null
@@ -259,8 +260,8 @@ const PRODUCT_ICON: Record<string, React.ElementType> = {
 
 // ─── Link existing connection picker ─────────────────────────────────────────
 function LinkConnectionPicker({
-  buildingName, tenantId, onDone,
-}: { buildingName: string; tenantId: string; onDone: () => void }) {
+  buildingId, buildingName, tenantId, onDone,
+}: { buildingId: string; buildingName: string; tenantId: string; onDone: () => void }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<DBConnection[]>([])
   const [linking, setLinking] = useState<string | null>(null)
@@ -282,7 +283,7 @@ function LinkConnectionPicker({
     setLinking(conn.id)
     await supabase
       .from('energy_connections')
-      .update({ building_name: buildingName })
+      .update({ building_id: buildingId, building_name: buildingName })
       .eq('id', conn.id)
     setLinked(prev => [...prev, conn.id])
     setLinking(null)
@@ -477,12 +478,12 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
   // Fetch connections: prefer those linked to this building, fall back to site
   useEffect(() => {
     async function loadConns() {
-      // First try: connections with building_name matching this building
+      // First try: connections with building_id matching this building
       const { data: linked } = await supabase
         .from('energy_connections')
         .select('*')
         .eq('tenant_id', tenantId)
-        .eq('building_name', building.name)
+        .eq('building_id', building.id)
       if (linked && linked.length > 0) {
         setConnections(linked)
       } else {
@@ -649,6 +650,7 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
           {showAddConn && (
             <div className="mb-4">
               <LinkConnectionPicker
+                buildingId={building.id}
                 buildingName={building.name}
                 tenantId={tenantId}
                 onDone={() => setShowAddConn(false)}
@@ -836,12 +838,12 @@ function BuildingList() {
       }
       setConnectionsBySite(grouped)
 
-      // Map connection_id → building_name and connection_id → site_id
-      const connToBuilding: Record<string, string> = {}
+      // Map connection_id → building_id (preferred) or site_id (fallback)
+      const connToBuildingId: Record<string, string> = {}
       const connToSite: Record<string, string> = {}
       for (const c of allConns) {
-        if (c.building_name) connToBuilding[c.id] = c.building_name
-        if (c.site_id)       connToSite[c.id]    = c.site_id
+        if (c.building_id) connToBuildingId[c.id] = c.building_id
+        if (c.site_id)     connToSite[c.id]       = c.site_id
       }
 
       const connIds = allConns.map(c => c.id)
@@ -852,27 +854,32 @@ function BuildingList() {
           .eq('tenant_id', tenantId)
           .in('connection_id', connIds)
 
-        // Sum kWh by building_name (directly linked) and by site (fallback pool)
-        const byBuilding: Record<string, number> = {}
+        // Sum kWh by building_id (directly linked) and by site (fallback pool)
+        const byBuildingId: Record<string, number> = {}
         const bySite: Record<string, number> = {}
         for (const r of (recs ?? [])) {
           if (r.unit && r.unit.toLowerCase().includes('m')) continue // skip gas m³
           const kwh = r.consumption ?? 0
-          const bName = connToBuilding[r.connection_id]
-          const sId   = connToSite[r.connection_id]
-          if (bName) {
-            byBuilding[bName] = (byBuilding[bName] ?? 0) + kwh
+          const bId = connToBuildingId[r.connection_id]
+          const sId = connToSite[r.connection_id]
+          if (bId) {
+            byBuildingId[bId] = (byBuildingId[bId] ?? 0) + kwh
           } else if (sId) {
             bySite[sId] = (bySite[sId] ?? 0) + kwh
           }
         }
 
-        // For buildings with no directly linked connections, divide site pool equally
-        // among unlinked buildings at that site
-        const linkedNames = new Set(Object.keys(byBuilding))
+        // Convert building_id keys → building_name keys for display
+        const byBuilding: Record<string, number> = {}
+        for (const b of bldgList) {
+          if (byBuildingId[b.id]) byBuilding[b.name] = byBuildingId[b.id]
+        }
+
+        // For unlinked buildings, divide site pool equally
+        const linkedIds = new Set(Object.keys(byBuildingId))
         const unlinkedBySite: Record<string, DBBuilding[]> = {}
         for (const b of bldgList) {
-          if (!linkedNames.has(b.name) && bySite[b.site_id]) {
+          if (!linkedIds.has(b.id) && bySite[b.site_id]) {
             if (!unlinkedBySite[b.site_id]) unlinkedBySite[b.site_id] = []
             unlinkedBySite[b.site_id].push(b)
           }
