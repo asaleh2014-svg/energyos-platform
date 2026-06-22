@@ -5,7 +5,7 @@ import { useAppStore } from '@/lib/store'
 import { useAuth, useTenantId } from '@/lib/auth'
 import { isDemoMode } from '@/lib/demo'
 import { supabase } from '@/lib/supabase'
-import { MARKET_CONFIGS, type Market } from '@/types'
+import { MARKET_CONFIGS, getMarketConfig, type Market } from '@/types'
 import { CO2_FACTORS, type ElecSource, MONTHS } from '@/lib/mockData'
 import {
   MapPin, X, Search, Globe, CopyCheck, ChevronDown, ChevronUp,
@@ -991,7 +991,7 @@ export default function Sites() {
           const countryCode = countrySites[0]?.cities?.countries?.code ?? ''
           const representativeMarket = getCityMarket(countryCities[0] ?? '')
           const allSame = countryCities.every(c => getCityMarket(c) === representativeMarket)
-          const cfg = MARKET_CONFIGS[representativeMarket]
+          const cfg = getMarketConfig(representativeMarket)
 
           return (
             <div key={country} className="mb-10">
@@ -1034,7 +1034,7 @@ export default function Sites() {
               {countryCities.map(city => {
                 const citySites = countrySites.filter(s => (s.cities?.name ?? 'Unknown') === city)
                 const cityMarket = getCityMarket(city)
-                const cityCfg = MARKET_CONFIGS[cityMarket]
+                const cityCfg = getMarketConfig(cityMarket)
                 const isCollapsed = collapsedCities.has(city)
 
                 return (
