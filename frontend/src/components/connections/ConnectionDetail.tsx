@@ -102,11 +102,55 @@ function makeConsumptionData(conn: FullConnection, period: Period) {
 
 // ─── Log types ────────────────────────────────────────────────────────────────
 interface ChangeLogEntry {
-  date: string
+  date: string        // ISO date
+  time: string        // HH:MM
   by: string
-  fields: { field: string; from: string; to: string }[]
+  summary: string     // e.g. "Department, Supplier"
+  snapshot: Partial<FullConnection>
 }
 interface ReadingEntry { date: string; normal: number; low: number; source: string }
+
+// ─── Snapshot viewer — full read-only copy of a past state ───────────────────
+function SnapshotViewer({
+  entry, onClose,
+}: { entry: ChangeLogEntry; onClose: () => void }) {
+  const s = entry.snapshot
+  return (
+    <div className="absolute inset-0 z-20 bg-bg-secondary flex flex-col">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-border-subtle bg-bg-primary/40">
+        <div>
+          <div className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Snapshot — {entry.date} {entry.time}</div>
+          <div className="text-[11px] text-white/35 mt-0.5">Saved by {entry.by} · {entry.summary}</div>
+        </div>
+        <button onClick={onClose} className="text-white/40 hover:text-white/80 transition-colors"><X size={16} /></button>
+      </div>
+      <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5 text-[11px]">
+        {([
+          ['CLIENT',          [['Client',s.client],['Department',s.department],['Name on account',s.name],['Invoice address',s.invoice_address],['Responsible',s.responsible],['Requested by',s.requested_by],['Contact person',s.contact_person]]],
+          ['CONNECTION',      [['Connection name',s.name],['EAN code',s.ean_code],['Product',s.product],['Connection type',s.connection_type],['Characteristic',s.characteristic]]],
+          ['ADDRESS',         [['Street',s.street],['House number',s.house_number],['Postcode',s.postcode],['City',s.city]]],
+          ['SUPPLIER',        [['Status',s.status],['Supplier',s.supplier],['Contract',s.contract],['Active since',s.active_since],['Grid operator',s.grid_operator]]],
+          ['CONSUMPTION',     [['Usage low',s.usage_low],['Usage normal',s.usage_normal],['Target usage',s.target_usage]]],
+          ['MONITORING',      [['Monitoring type',s.monitoring_type],['Measurement company',s.measurement_company]]],
+          ['FINANCIAL',       [['Cost center',s.cost_center],['Costs',s.costs]]],
+          ['COMMENTS',        [['Remarks',s.remarks]]],
+        ] as [string, [string, unknown][]][]).map(([section, fields]) => (
+          <div key={section}>
+            <div className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest mb-2 pb-1 border-b border-border-subtle">{section}</div>
+            <div className="space-y-0.5">
+              {fields.map(([label, val]) => (
+                <div key={label} className="flex gap-2 py-0.5">
+                  <span className="w-[140px] min-w-[140px] text-white/30 text-[10px]">{label}</span>
+                  <span className="text-white/70">{val !== undefined && val !== null && val !== '' ? String(val) : '—'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 // ─── Editable field row (used inside edit mode) ────────────────────────────────
 function EField({
@@ -496,6 +540,7 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
   const [connState,     setConnState]     = useState(conn)
   const [draft,         setDraft]         = useState<Partial<FullConnection>>({})
   const [saving,        setSaving]        = useState(false)
+  const [viewSnapshot,  setViewSnapshot]  = useState<ChangeLogEntry | null>(null)
 
   // Fetch logs from DB
   useEffect(() => {
@@ -559,7 +604,14 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
 
     if (changed.length === 0) { setShowEdit(false); return }
 
-    const newLog = [...changeLog, { date: today, by: 'User', fields: changed }]
+    const now     = new Date()
+    const time    = now.toTimeString().slice(0, 5)
+    const summary = changed.map(c => c.field).join(', ')
+    const entry: ChangeLogEntry = {
+      date: today, time, by: 'User', summary,
+      snapshot: { ...connState },   // full state BEFORE applying draft
+    }
+    const newLog = [...changeLog, entry]
 
     // Only send columns that actually exist in energy_connections
     const DB_COLUMNS: (keyof FullConnection)[] = [
@@ -728,7 +780,10 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
         </div>
 
         {/* ── Body (two columns) ─────────────────────────────────────────── */}
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden relative">
+          {viewSnapshot && (
+            <SnapshotViewer entry={viewSnapshot} onClose={() => setViewSnapshot(null)} />
+          )}
 
           {/* Left column — info sections */}
           <div className="w-[340px] min-w-[340px] border-r border-border-subtle overflow-y-auto bg-bg-primary/30">
@@ -1101,36 +1156,25 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
               <MiniMap lat={conn.latitude} lon={conn.longitude} color={color} />
             </div>
 
-            {/* Change log — auto-populated on every save, read-only */}
+            {/* Change log — click a row to view full snapshot */}
             <div className="card p-0 overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border-subtle">
                 <AlertCircle size={12} className="text-accent" />
                 <span className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest">Change Log</span>
-                <span className="ml-auto text-[10px] text-white/25">auto-updated on save</span>
+                <span className="ml-auto text-[10px] text-white/25">click to view full snapshot</span>
               </div>
               {changeLog.length === 0 ? (
-                <p className="text-center text-white/25 italic text-[11px] py-4">No changes recorded yet — edit and save to start tracking</p>
+                <p className="text-center text-white/25 italic text-[11px] py-4">No changes yet — edit and save to start tracking</p>
               ) : (
                 <div className="divide-y divide-border-subtle">
                   {[...changeLog].reverse().map((entry, i) => (
-                    <div key={i} className="px-4 py-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="font-mono text-[10px] text-white/40">{entry.date}</span>
-                        <span className="text-[10px] text-white/30">·</span>
-                        <span className="text-[10px] text-white/50">{entry.by}</span>
-                        <span className="ml-auto text-[10px] text-white/25">{entry.fields.length} field{entry.fields.length !== 1 ? 's' : ''} changed</span>
-                      </div>
-                      <div className="space-y-1">
-                        {entry.fields.map((f, j) => (
-                          <div key={j} className="flex items-baseline gap-2 text-[11px]">
-                            <span className="text-white/40 w-[120px] min-w-[120px] truncate">{f.field}</span>
-                            <span className="text-red-400/60 line-through truncate max-w-[80px]">{f.from || '—'}</span>
-                            <span className="text-white/30">→</span>
-                            <span className="text-emerald-400/80 truncate max-w-[80px]">{f.to || '—'}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    <button key={i} onClick={() => setViewSnapshot(entry)}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/5 transition-colors text-left">
+                      <div className="w-1.5 h-1.5 rounded-full bg-accent/60 flex-shrink-0" />
+                      <span className="font-mono text-[11px] text-accent-hover">{entry.date} {entry.time}</span>
+                      <span className="text-[10px] text-white/30 truncate flex-1">{entry.summary}</span>
+                      <span className="text-[10px] text-white/20 flex-shrink-0">by {entry.by}</span>
+                    </button>
                   ))}
                 </div>
               )}
