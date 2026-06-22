@@ -100,21 +100,97 @@ function makeConsumptionData(conn: FullConnection, period: Period) {
   return rows
 }
 
-function makeCapacityLog() {
-  return [
-    { date: '01-01-2022', value: '3x250A', old: '—',     by: 'System',      on: '01-01-2022' },
-    { date: '01-06-2023', value: '3x315A', old: '3x250A', by: 'Ahmad Al-H.', on: '28-05-2023' },
-    { date: '01-01-2025', value: '3x400A', old: '3x315A', by: 'Ahmad Al-H.', on: '15-12-2024' },
-  ]
-}
+// ─── Log types ────────────────────────────────────────────────────────────────
+interface CapacityEntry  { date: string; value: string; old: string; by: string; on: string }
+interface StatusEntry    { date: string; status: string; supplier: string; by: string }
+interface ReadingEntry   { date: string; normal: number; low: number; source: string }
 
-function makeStatusLog(conn: FullConnection) {
-  const supplier = conn.supplier
-  return [
-    { date: conn.connection_start || '01-01-2022', status: 'Active',   supplier, by: 'System' },
-    { date: '01-06-2023',                           status: 'Inactive', supplier, by: 'Ahmad Al-H.' },
-    { date: '01-07-2023',                           status: 'Active',   supplier, by: 'Ahmad Al-H.' },
-  ]
+// ─── Inline editable log ──────────────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function EditableLog<T extends Record<string, any>>({
+  title, rows, columns, emptyRow, onSave,
+}: {
+  title: string
+  rows: T[]
+  columns: { key: keyof T; label: string; type?: string }[]
+  emptyRow: T
+  onSave: (rows: T[]) => Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft]     = useState<T[]>(rows)
+  const [saving, setSaving]   = useState(false)
+
+  useEffect(() => { setDraft(rows) }, [rows])
+
+  async function save() {
+    setSaving(true)
+    await onSave(draft)
+    setSaving(false)
+    setEditing(false)
+  }
+
+  function addRow() { setDraft(d => [...d, { ...emptyRow }]) }
+  function removeRow(i: number) { setDraft(d => d.filter((_, j) => j !== i)) }
+  function setCell(i: number, key: keyof T, val: string) {
+    setDraft(d => d.map((r, j) => j === i ? { ...r, [key]: val } : r))
+  }
+
+  return (
+    <div className="card p-0 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-border-subtle">
+        <span className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest">{title}</span>
+        <div className="flex items-center gap-2">
+          {editing ? (
+            <>
+              <button onClick={addRow} className="text-[10px] text-accent hover:text-accent-hover px-2 py-0.5 border border-accent/30 rounded-md transition-colors">+ Add row</button>
+              <button onClick={save} disabled={saving} className="text-[10px] text-emerald-400 hover:text-emerald-300 px-2 py-0.5 border border-emerald-500/30 rounded-md transition-colors">
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button onClick={() => { setDraft(rows); setEditing(false) }} className="text-[10px] text-white/30 hover:text-white/60 px-2 py-0.5 border border-border-subtle rounded-md">Cancel</button>
+            </>
+          ) : (
+            <button onClick={() => setEditing(true)} className="text-[10px] text-white/30 hover:text-white/60 px-2 py-0.5 border border-border-subtle rounded-md transition-colors">Edit</button>
+          )}
+        </div>
+      </div>
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="border-b border-border-subtle">
+            {columns.map(c => <th key={String(c.key)} className="tbl-th text-[10px]">{c.label}</th>)}
+            {editing && <th className="tbl-th w-6" />}
+          </tr>
+        </thead>
+        <tbody>
+          {draft.length === 0 && (
+            <tr><td colSpan={columns.length + 1} className="tbl-td text-center text-white/25 py-4 italic">No entries yet — click Edit to add</td></tr>
+          )}
+          {draft.map((row, i) => (
+            <tr key={i} className="border-b border-border-subtle hover:bg-bg-card/50">
+              {columns.map(c => (
+                <td key={String(c.key)} className="tbl-td">
+                  {editing ? (
+                    <input
+                      type={c.type ?? 'text'}
+                      value={String(row[c.key] ?? '')}
+                      onChange={e => setCell(i, c.key, e.target.value)}
+                      className="w-full bg-bg-primary border border-border-subtle text-white/80 text-[11px] rounded px-1.5 py-0.5 focus:outline-none focus:border-accent"
+                    />
+                  ) : (
+                    <span className="text-white/60">{String(row[c.key] ?? '—')}</span>
+                  )}
+                </td>
+              ))}
+              {editing && (
+                <td className="tbl-td">
+                  <button onClick={() => removeRow(i)} className="text-red-400/50 hover:text-red-400 transition-colors text-xs">✕</button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -377,12 +453,33 @@ interface Props {
 export default function ConnectionDetail({ conn, onClose }: Props) {
   const tenantId = useTenantId()
   const color = PRODUCT_COLOR[conn.product] ?? '#6b7280'
-  const capacityLog = makeCapacityLog()
-  const statusLog = makeStatusLog(conn)
-  const [energyUnit, setEnergyUnit] = useState<'kWh' | 'MWh'>('kWh')
-  const [showTable,  setShowTable]  = useState(false)
-  const [period,     setPeriod]     = useState<Period>(DEFAULT_PERIOD)
-  const [dbRecords,  setDbRecords]  = useState<{ period_start: string; consumption: number }[] | null>(null)
+  const [energyUnit,   setEnergyUnit]   = useState<'kWh' | 'MWh'>('kWh')
+  const [showTable,    setShowTable]    = useState(false)
+  const [period,       setPeriod]       = useState<Period>(DEFAULT_PERIOD)
+  const [dbRecords,    setDbRecords]    = useState<{ period_start: string; consumption: number }[] | null>(null)
+  const [capacityLog,  setCapacityLog]  = useState<CapacityEntry[]>([])
+  const [statusLog,    setStatusLog]    = useState<StatusEntry[]>([])
+  const [meterReadings,setMeterReadings]= useState<ReadingEntry[]>([])
+
+  // Fetch logs from DB
+  useEffect(() => {
+    if (!conn.id) return
+    supabase
+      .from('energy_connections')
+      .select('capacity_log, status_log, meter_readings')
+      .eq('id', conn.id)
+      .single()
+      .then(({ data }) => {
+        if (!data) return
+        setCapacityLog(data.capacity_log ?? [])
+        setStatusLog(data.status_log ?? [])
+        setMeterReadings(data.meter_readings ?? [])
+      })
+  }, [conn.id])
+
+  async function saveLog(field: 'capacity_log' | 'status_log' | 'meter_readings', rows: unknown[]) {
+    await supabase.from('energy_connections').update({ [field]: rows }).eq('id', conn.id)
+  }
 
   const isElec = conn.product === 'Electricity'
   const baseUnit = isElec ? 'kWh' : 'm³'
@@ -614,34 +711,19 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
 
             {/* Contract capacity log */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Activity size={13} className="text-accent" />
-                <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Contract Capacity Log</h3>
-              </div>
-              <div className="card p-0 overflow-hidden">
-                <table className="w-full text-[11px]">
-                  <thead>
-                    <tr className="border-b border-border-subtle">
-                      {['Effective', 'Value', 'Previous', 'Changed by', 'Changed on'].map(h => (
-                        <th key={h} className="tbl-th text-[10px]">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {capacityLog.map((r, i) => (
-                      <tr key={i} className="border-b border-border-subtle hover:bg-bg-card/50">
-                        <td className="tbl-td font-mono text-white/60">{r.date}</td>
-                        <td className="tbl-td text-accent-hover font-semibold">{r.value}</td>
-                        <td className="tbl-td text-white/40">{r.old}</td>
-                        <td className="tbl-td text-white/60">{r.by}</td>
-                        <td className="tbl-td font-mono text-white/40">{r.on}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <EditableLog<CapacityEntry>
+              title="Contract Capacity Log"
+              rows={capacityLog}
+              columns={[
+                { key: 'date',  label: 'Effective' },
+                { key: 'value', label: 'Value' },
+                { key: 'old',   label: 'Previous' },
+                { key: 'by',    label: 'Changed by' },
+                { key: 'on',    label: 'Changed on' },
+              ]}
+              emptyRow={{ date: '', value: '', old: '—', by: '', on: '' }}
+              onSave={rows => { setCapacityLog(rows); return saveLog('capacity_log', rows) }}
+            />
 
             {/* Consumption chart */}
             <div>
@@ -828,41 +910,18 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
             </div>
 
             {/* Status log */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <AlertCircle size={13} className="text-accent" />
-                <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Status Log</h3>
-              </div>
-              <div className="card p-0 overflow-hidden">
-                <table className="w-full text-[11px]">
-                  <thead>
-                    <tr className="border-b border-border-subtle">
-                      {['Date', 'Status', 'Supplier', 'Changed by'].map(h => (
-                        <th key={h} className="tbl-th text-[10px]">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {statusLog.map((r, i) => (
-                      <tr key={i} className="border-b border-border-subtle hover:bg-bg-card/50">
-                        <td className="tbl-td font-mono text-white/60">{r.date}</td>
-                        <td className="tbl-td">
-                          <span className={clsx(
-                            'text-[10px] px-2 py-0.5 rounded-full font-medium',
-                            r.status === 'Active'   && 'bg-success/15 text-success-light',
-                            r.status === 'Inactive' && 'bg-danger/15 text-danger-light',
-                          )}>
-                            {r.status}
-                          </span>
-                        </td>
-                        <td className="tbl-td text-white/60">{r.supplier}</td>
-                        <td className="tbl-td text-white/50">{r.by}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <EditableLog<StatusEntry>
+              title="Status Log"
+              rows={statusLog}
+              columns={[
+                { key: 'date',     label: 'Date' },
+                { key: 'status',   label: 'Status' },
+                { key: 'supplier', label: 'Supplier' },
+                { key: 'by',       label: 'Changed by' },
+              ]}
+              emptyRow={{ date: '', status: 'Active', supplier: conn.supplier ?? '', by: '' }}
+              onSave={rows => { setStatusLog(rows); return saveLog('status_log', rows) }}
+            />
 
             {/* Energy meters */}
             <div>
@@ -874,13 +933,18 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
             </div>
 
             {/* Meter readings */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <Activity size={13} className="text-accent" />
-                <h3 className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Meter Readings</h3>
-              </div>
-              <MeterReadingsCard conn={conn} unit={unit} />
-            </div>
+            <EditableLog<ReadingEntry>
+              title="Meter Readings"
+              rows={meterReadings}
+              columns={[
+                { key: 'date',   label: 'Date' },
+                { key: 'normal', label: 'Normal (kWh)', type: 'number' },
+                { key: 'low',    label: 'Low (kWh)',    type: 'number' },
+                { key: 'source', label: 'Source' },
+              ]}
+              emptyRow={{ date: '', normal: 0, low: 0, source: 'Manual' }}
+              onSave={rows => { setMeterReadings(rows); return saveLog('meter_readings', rows) }}
+            />
 
             {/* Bottom spacer */}
             <div className="h-4" />
