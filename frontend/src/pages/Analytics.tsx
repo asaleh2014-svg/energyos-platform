@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
-import { MARKET_CONFIGS } from '@/types'
+import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import {
   Zap, Flame, Upload, Download, CheckCircle, AlertTriangle, X, Loader2,
   TrendingUp, TrendingDown, Minus, BarChart3, Activity,
@@ -540,7 +540,7 @@ function ImportView({ tenantId, onImported }: { tenantId: string; onImported: ()
 export default function Analytics() {
   const { market } = useAppStore()
   const tenantId = useTenantId()
-  const _cfg = MARKET_CONFIGS[market]; void _cfg
+  const _cfg = getMarketConfig(market); void _cfg
 
   const [tab,    setTab]    = useState<PageTab>('charts')
   // Default: span 2024-2025 to show all available demo data

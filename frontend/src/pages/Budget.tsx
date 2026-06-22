@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
-import { MARKET_CONFIGS } from '@/types'
+import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import { useTenantId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { fetchConnections } from '@/lib/dbQueries'
@@ -46,7 +46,7 @@ function fmt(v: number, sym: string) {
 
 export default function Budget() {
   const { market } = useAppStore()
-  const cfg = MARKET_CONFIGS[market]
+  const cfg = getMarketConfig(market)
   const tenantId = useTenantId()
 
   const [loading, setLoading]     = useState(true)

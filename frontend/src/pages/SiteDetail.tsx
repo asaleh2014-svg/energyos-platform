@@ -5,7 +5,7 @@ import {
   UAE_UTILITY_MIXES, CO2_FACTORS, type ElecSource,
 } from '@/lib/mockData'
 import { useAppStore } from '@/lib/store'
-import { MARKET_CONFIGS } from '@/types'
+import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import { useTenantId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { fetchConsumption, sumConsumption, groupByMonth, monthsAgo } from '@/lib/dbQueries'
@@ -74,7 +74,7 @@ export default function SiteDetail() {
   const { siteId } = useParams<{ siteId: string }>()
   const navigate   = useNavigate()
   const { market, siteMixes, setSiteMix, applySiteMixToCity } = useAppStore()
-  const cfg = MARKET_CONFIGS[market]
+  const cfg = getMarketConfig(market)
   const tenantId = useTenantId()
 
   // DB state

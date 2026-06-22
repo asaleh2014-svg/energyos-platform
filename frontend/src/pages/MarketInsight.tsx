@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
-import { MARKET_CONFIGS } from '@/types'
+import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import { ChartCard } from '@/components/ChartCard'
 import { TrendingUp, TrendingDown, Minus, Zap, Flame, Droplets } from 'lucide-react'
 import {
@@ -69,7 +69,7 @@ type Utility = typeof UTILITIES[0]
 
 export default function MarketInsight() {
   const { market } = useAppStore()
-  const cfg = MARKET_CONFIGS[market]
+  const cfg = getMarketConfig(market)
   const [activeUtil, setActiveUtil] = useState<Utility | null>(null)
 
   const currentElec = ELEC_PRICES[ELEC_PRICES.length - 1]

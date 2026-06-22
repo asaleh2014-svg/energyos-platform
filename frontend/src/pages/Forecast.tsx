@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
-import { MARKET_CONFIGS } from '@/types'
+import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import { useTenantId } from '@/lib/auth'
 import { fetchConsumption } from '@/lib/dbQueries'
 import { ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area } from 'recharts'
@@ -35,7 +35,7 @@ function linearRegression(points: number[]): { slope: number; intercept: number 
 
 export default function Forecast() {
   const { market } = useAppStore()
-  const cfg = MARKET_CONFIGS[market]
+  const cfg = getMarketConfig(market)
   const tenantId = useTenantId()
   const [loading, setLoading] = useState(true)
   const [forecastData, setForecastData] = useState<ForecastRow[]>([])

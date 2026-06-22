@@ -3,7 +3,7 @@ import { Topbar } from '@/components/layout/Topbar'
 import { StatCard } from '@/components/dashboard/StatCard'
 import { UAEMap } from '@/components/dashboard/UAEMap'
 import { useAppStore } from '@/lib/store'
-import { MARKET_CONFIGS } from '@/types'
+import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import { useNavigate } from 'react-router-dom'
 import { Zap, DollarSign, Activity, PieChart, Globe, Pin, X, BarChart3, CheckCircle2 } from 'lucide-react'
 import { UnitSelect } from '@/components/UnitSelect'
@@ -42,7 +42,7 @@ const AVAILABLE_WIDGETS: { id: WidgetId; label: string; icon: string }[] = [
 
 export default function Dashboard() {
   const { market } = useAppStore()
-  const cfg = MARKET_CONFIGS[market]
+  const cfg = getMarketConfig(market)
   const navigate = useNavigate()
   const tenantId = useTenantId()
 

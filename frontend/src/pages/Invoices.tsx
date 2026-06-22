@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
-import { MARKET_CONFIGS } from '@/types'
+import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import { supabase, type InvoiceRow } from '@/lib/supabase'
 import { useTenantId } from '@/lib/auth'
 import { aiApi } from '@/lib/api'
@@ -65,7 +65,7 @@ interface AIAnalysis {
 export default function Invoices() {
   const { market, aiProvider } = useAppStore()
   const tenantId = useTenantId()
-  const cfg = MARKET_CONFIGS[market]
+  const cfg = getMarketConfig(market)
   const { sites, conns } = useSitesAndConnections(tenantId)
 
   const [tab,          setTab]          = useState<PageTab>('list')

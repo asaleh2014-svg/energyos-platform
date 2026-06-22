@@ -405,3 +405,8 @@ export const MARKET_CONFIGS: Record<Market, MarketConfig> = {
 
 // Legacy alias — keep 'UAE' pointing to Dubai as default
 export const UAE = MARKET_CONFIGS['UAE-DXB']
+
+// Safe lookup — always returns a valid config even if market is undefined/stale
+export function getMarketConfig(market: Market | undefined | null) {
+  return MARKET_CONFIGS[market as Market] ?? MARKET_CONFIGS['UAE-DXB']
+}

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useAppStore } from '@/lib/store'
 import { useAuth, useTenantId } from '@/lib/auth'
-import { MARKET_CONFIGS } from '@/types'
+import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import {
   LayoutDashboard, BarChart3, Zap, Building2, Gauge, Bot,
   Receipt, Settings, X, Leaf, TrendingDown,
@@ -59,7 +59,7 @@ export function Sidebar() {
   const { tenant, market, sidebarOpen, toggleSidebar } = useAppStore()
   const { profile, signOut } = useAuth()
   const criticalCount = useAlertCount()
-  const cfg = MARKET_CONFIGS[market]
+  const cfg = getMarketConfig(market) ?? MARKET_CONFIGS['UAE-DXB']
 
   if (!sidebarOpen) return null
 
