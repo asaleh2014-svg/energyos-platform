@@ -101,58 +101,38 @@ function makeConsumptionData(conn: FullConnection, period: Period) {
 }
 
 // ─── Log types ────────────────────────────────────────────────────────────────
-interface StatusEntry  { date: string; status: string; supplier: string; by: string }
+interface ChangeLogEntry {
+  date: string
+  by: string
+  fields: { field: string; from: string; to: string }[]
+}
 interface ReadingEntry { date: string; normal: number; low: number; source: string }
 
-// ─── Quick-edit panel for key connection fields ───────────────────────────────
-function EditConnectionPanel({
-  conn, onSave, onCancel,
+// ─── Editable field row (used inside edit mode) ────────────────────────────────
+function EField({
+  label, fieldKey, draft, onChange, type = 'text', options,
 }: {
-  conn: FullConnection
-  onSave: (changes: Partial<FullConnection>) => Promise<void>
-  onCancel: () => void
+  label: string
+  fieldKey: keyof FullConnection
+  draft: Partial<FullConnection>
+  onChange: (k: keyof FullConnection, v: string) => void
+  type?: string
+  options?: string[]
 }) {
-  const [status,   setStatus]   = useState<'Active' | 'Inactive' | 'Pending'>(conn.status ?? 'Active')
-  const [supplier, setSupplier] = useState(conn.supplier ?? '')
-  const [contract, setContract] = useState(conn.contract ?? '')
-  const [saving,   setSaving]   = useState(false)
-
-  async function handleSave() {
-    setSaving(true)
-    await onSave({ status, supplier, contract })
-    setSaving(false)
-  }
-
+  const val = String(draft[fieldKey] ?? '')
   return (
-    <div className="card space-y-3 border border-accent/20">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Edit Connection</span>
-        <button onClick={onCancel} className="text-white/30 hover:text-white/60 transition-colors"><X size={14} /></button>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-widest block mb-1">Status</label>
-          <select value={status} onChange={e => setStatus(e.target.value as 'Active' | 'Inactive' | 'Pending')} className="form-select w-full text-sm">
-            <option>Active</option>
-            <option>Inactive</option>
-            <option>Pending</option>
-            <option>Terminated</option>
+    <div className="flex items-center gap-2 py-1 min-h-[26px]">
+      <div className="w-[148px] min-w-[148px] text-[10px] text-white/35 leading-tight">{label}</div>
+      <div className="flex-1">
+        {options ? (
+          <select value={val} onChange={e => onChange(fieldKey, e.target.value)}
+            className="w-full bg-bg-primary border border-border-subtle/60 text-white/80 text-[11px] rounded px-1.5 py-0.5 focus:outline-none focus:border-accent">
+            {options.map(o => <option key={o}>{o}</option>)}
           </select>
-        </div>
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-widest block mb-1">Supplier</label>
-          <input value={supplier} onChange={e => setSupplier(e.target.value)} className="form-input w-full text-sm" />
-        </div>
-        <div>
-          <label className="text-[10px] text-white/40 uppercase tracking-widest block mb-1">Contract</label>
-          <input value={contract} onChange={e => setContract(e.target.value)} className="form-input w-full text-sm" />
-        </div>
-      </div>
-      <div className="flex gap-2 justify-end pt-1">
-        <button onClick={onCancel} className="text-xs text-white/40 hover:text-white/70 px-3 py-1.5 border border-border-subtle rounded-lg transition-colors">Cancel</button>
-        <button onClick={handleSave} disabled={saving} className="text-xs text-emerald-400 hover:text-emerald-300 px-3 py-1.5 border border-emerald-500/30 rounded-lg transition-colors">
-          {saving ? 'Saving…' : 'Save changes'}
-        </button>
+        ) : (
+          <input type={type} value={val} onChange={e => onChange(fieldKey, e.target.value)}
+            className="w-full bg-bg-primary border border-border-subtle/60 text-white/80 text-[11px] rounded px-1.5 py-0.5 focus:outline-none focus:border-accent" />
+        )}
       </div>
     </div>
   )
@@ -510,10 +490,12 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
   const [showTable,     setShowTable]     = useState(false)
   const [period,        setPeriod]        = useState<Period>(DEFAULT_PERIOD)
   const [dbRecords,     setDbRecords]     = useState<{ period_start: string; consumption: number }[] | null>(null)
-  const [statusLog,     setStatusLog]     = useState<StatusEntry[]>([])
+  const [changeLog,     setChangeLog]     = useState<ChangeLogEntry[]>([])
   const [meterReadings, setMeterReadings] = useState<ReadingEntry[]>([])
   const [showEdit,      setShowEdit]      = useState(false)
   const [connState,     setConnState]     = useState(conn)
+  const [draft,         setDraft]         = useState<Partial<FullConnection>>({})
+  const [saving,        setSaving]        = useState(false)
 
   // Fetch logs from DB
   useEffect(() => {
@@ -525,37 +507,74 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
       .single()
       .then(({ data }) => {
         if (!data) return
-        setStatusLog(data.status_log ?? [])
+        setChangeLog(data.status_log ?? [])
         setMeterReadings(data.meter_readings ?? [])
       })
   }, [conn.id])
 
-  async function saveLog(field: 'status_log' | 'meter_readings', rows: unknown[]) {
-    await supabase.from('energy_connections').update({ [field]: rows }).eq('id', conn.id)
+  function startEdit() {
+    setDraft({ ...connState })
+    setShowEdit(true)
   }
 
-  async function handleEditSave(changes: Partial<FullConnection>) {
-    const today = new Date().toISOString().slice(0, 10)
-    const newLog = [...statusLog]
+  function setDraftField(k: keyof FullConnection, v: string) {
+    setDraft(d => ({ ...d, [k]: v }))
+  }
 
-    // Auto-append to status log if status or supplier changed
-    if (changes.status !== connState.status || changes.supplier !== connState.supplier) {
-      newLog.push({
-        date:     today,
-        status:   changes.status   ?? connState.status   ?? '',
-        supplier: changes.supplier ?? connState.supplier ?? '',
-        by:       'User',
-      })
+  async function handleEditSave() {
+    const today = new Date().toISOString().slice(0, 10)
+
+    // Diff every field in draft against connState
+    const LABELS: Partial<Record<keyof FullConnection, string>> = {
+      client: 'Client', department: 'Department', name: 'Name on account',
+      invoice_address: 'Invoice address', responsible: 'Responsible',
+      requested_by: 'Requested by', contact_person: 'Contact person',
+      object_code: 'Object code', allocation_type: 'Allocation type',
+      ean_code: 'EAN code', characteristic: 'Characteristic',
+      connection_type: 'Connection type', street: 'Street',
+      house_number: 'House number', addition: 'Addition',
+      postcode: 'Postcode', city: 'City', building: 'Building',
+      energy_label: 'Energy label', usage_category: 'Usage category',
+      usage_type: 'Usage type', monitoring: 'Monitoring',
+      market_segment: 'Market segment', telemetry: 'Telemetry',
+      connection_value: 'Connection value', profile_category: 'Profile category',
+      grid_operator: 'Grid operator', connection_start: 'Connection start',
+      status: 'Status', supplier: 'Supplier', supplier_contract: 'Supplier contract',
+      active_on: 'Active on', active_since: 'Active since', contract: 'Contract',
+      usage_low: 'Usage low (kWh/yr)', usage_normal: 'Usage normal (kWh/yr)',
+      target_usage: 'Target usage', monitoring_type: 'Monitoring type',
+      monitoring_start: 'Monitoring start', data_available: 'Data available',
+      measurement_company: 'Measurement company', cost_center: 'Cost center',
+      tax_cluster: 'Tax cluster', rubricering: 'Rubricering', costs: 'Costs',
+      remarks: 'Comments',
     }
 
+    const changed: { field: string; from: string; to: string }[] = []
+    for (const [k, label] of Object.entries(LABELS)) {
+      const key = k as keyof FullConnection
+      const oldVal = String(connState[key] ?? '')
+      const newVal = String(draft[key] ?? '')
+      if (oldVal !== newVal) changed.push({ field: label, from: oldVal, to: newVal })
+    }
+
+    if (changed.length === 0) { setShowEdit(false); return }
+
+    const newLog = [...changeLog, { date: today, by: 'User', fields: changed }]
+
+    setSaving(true)
     await supabase
       .from('energy_connections')
-      .update({ ...changes, status_log: newLog })
+      .update({ ...draft, status_log: newLog })
       .eq('id', conn.id)
+    setSaving(false)
 
-    setConnState(prev => ({ ...prev, ...changes }))
-    setStatusLog(newLog)
+    setConnState(prev => ({ ...prev, ...draft }))
+    setChangeLog(newLog)
     setShowEdit(false)
+  }
+
+  async function saveLog(field: 'meter_readings', rows: unknown[]) {
+    await supabase.from('energy_connections').update({ [field]: rows }).eq('id', conn.id)
   }
 
   const isElec = conn.product === 'Electricity'
@@ -672,7 +691,7 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
             {/* Action icons */}
             <div className="flex items-center gap-1 flex-shrink-0">
               {[
-                { Icon: Edit2,    title: 'Edit',    onClick: () => setShowEdit(v => !v) },
+                { Icon: Edit2,    title: 'Edit',    onClick: () => showEdit ? setShowEdit(false) : startEdit() },
                 { Icon: Maximize2,title: 'Expand',  onClick: undefined },
                 { Icon: Printer,  title: 'Print',   onClick: undefined },
                 { Icon: History,  title: 'History', onClick: undefined },
@@ -694,107 +713,189 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
           </div>
         </div>
 
-        {/* ── Edit panel ────────────────────────────────────────────────── */}
-        {showEdit && (
-          <div className="px-4 py-3 border-b border-border-subtle bg-bg-primary/40">
-            <EditConnectionPanel
-              conn={connState}
-              onSave={handleEditSave}
-              onCancel={() => setShowEdit(false)}
-            />
-          </div>
-        )}
-
         {/* ── Body (two columns) ─────────────────────────────────────────── */}
         <div className="flex flex-1 overflow-hidden">
 
           {/* Left column — info sections */}
           <div className="w-[340px] min-w-[340px] border-r border-border-subtle overflow-y-auto bg-bg-primary/30">
 
+            {/* Edit mode save/cancel bar */}
+            {showEdit && (
+              <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-2 bg-accent/10 border-b border-accent/30">
+                <span className="text-[11px] text-accent-hover font-medium">Editing — change any field below</span>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowEdit(false)} className="text-[11px] text-white/40 hover:text-white/70 px-2 py-0.5 border border-border-subtle rounded transition-colors">Cancel</button>
+                  <button onClick={handleEditSave} disabled={saving} className="text-[11px] text-emerald-400 hover:text-emerald-300 px-2 py-0.5 border border-emerald-500/30 rounded transition-colors">
+                    {saving ? 'Saving…' : 'Save changes'}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <Section title="Client">
-              <Field label="Client"                 value={conn.client} />
-              <Field label="Department"              value={conn.department} />
-              <Field label="Name on account"         value={conn.name} />
-              <Field label="Invoice address"         value={conn.invoice_address} />
-              <Field label="Responsible"             value={conn.responsible} />
-              <Field label="Requested by"            value={conn.requested_by} />
-              <Field label="Contact person"          value={conn.contact_person} />
+              {showEdit ? (<>
+                <EField label="Client"           fieldKey="client"          draft={draft} onChange={setDraftField} />
+                <EField label="Department"        fieldKey="department"      draft={draft} onChange={setDraftField} />
+                <EField label="Name on account"   fieldKey="name"            draft={draft} onChange={setDraftField} />
+                <EField label="Invoice address"   fieldKey="invoice_address" draft={draft} onChange={setDraftField} />
+                <EField label="Responsible"       fieldKey="responsible"     draft={draft} onChange={setDraftField} />
+                <EField label="Requested by"      fieldKey="requested_by"    draft={draft} onChange={setDraftField} />
+                <EField label="Contact person"    fieldKey="contact_person"  draft={draft} onChange={setDraftField} />
+              </>) : (<>
+                <Field label="Client"            value={connState.client} />
+                <Field label="Department"         value={connState.department} />
+                <Field label="Name on account"    value={connState.name} />
+                <Field label="Invoice address"    value={connState.invoice_address} />
+                <Field label="Responsible"        value={connState.responsible} />
+                <Field label="Requested by"       value={connState.requested_by} />
+                <Field label="Contact person"     value={connState.contact_person} />
+              </>)}
             </Section>
 
             <Section title="Connection">
-              <Field label="Connection name"         value={conn.name} />
-              <Field label="Object code"             value={conn.object_code} />
-              <Field label="Allocation type"         value={conn.allocation_type} />
-              <Field label="Product"                 value={conn.product} />
-              <Field label="EAN code"                value={conn.ean_code} />
-              <Field label="Characteristic"          value={conn.characteristic} />
-              <Field label="Connection type"         value={conn.connection_type} />
+              {showEdit ? (<>
+                <EField label="Connection name"   fieldKey="name"             draft={draft} onChange={setDraftField} />
+                <EField label="Object code"        fieldKey="object_code"      draft={draft} onChange={setDraftField} />
+                <EField label="Allocation type"    fieldKey="allocation_type"  draft={draft} onChange={setDraftField} />
+                <EField label="EAN code"           fieldKey="ean_code"         draft={draft} onChange={setDraftField} />
+                <EField label="Characteristic"     fieldKey="characteristic"   draft={draft} onChange={setDraftField} />
+                <EField label="Connection type"    fieldKey="connection_type"  draft={draft} onChange={setDraftField} />
+              </>) : (<>
+                <Field label="Connection name"    value={connState.name} />
+                <Field label="Object code"         value={connState.object_code} />
+                <Field label="Allocation type"     value={connState.allocation_type} />
+                <Field label="Product"             value={connState.product} />
+                <Field label="EAN code"            value={connState.ean_code} />
+                <Field label="Characteristic"      value={connState.characteristic} />
+                <Field label="Connection type"     value={connState.connection_type} />
+              </>)}
             </Section>
 
             <Section title="Address & Location">
-              <Field label="Street"                  value={conn.street} />
-              <Field label="House number"            value={conn.house_number} />
-              <Field label="Addition"                value={conn.addition} />
-              <Field label="Postcode"                value={conn.postcode} />
-              <Field label="City"                    value={conn.city} />
-              <Field label="GPS"                     value={conn.gps} />
+              {showEdit ? (<>
+                <EField label="Street"       fieldKey="street"       draft={draft} onChange={setDraftField} />
+                <EField label="House number"  fieldKey="house_number" draft={draft} onChange={setDraftField} />
+                <EField label="Addition"      fieldKey="addition"     draft={draft} onChange={setDraftField} />
+                <EField label="Postcode"      fieldKey="postcode"     draft={draft} onChange={setDraftField} />
+                <EField label="City"          fieldKey="city"         draft={draft} onChange={setDraftField} />
+              </>) : (<>
+                <Field label="Street"        value={connState.street} />
+                <Field label="House number"   value={connState.house_number} />
+                <Field label="Addition"       value={connState.addition} />
+                <Field label="Postcode"       value={connState.postcode} />
+                <Field label="City"           value={connState.city} />
+                <Field label="GPS"            value={connState.gps} />
+              </>)}
             </Section>
 
             <Section title="Building" defaultOpen={false}>
-              <Field label="Building"                value={conn.building} />
-              <Field label="Energy label"            value={conn.energy_label} />
+              {showEdit ? (<>
+                <EField label="Building"     fieldKey="building"     draft={draft} onChange={setDraftField} />
+                <EField label="Energy label"  fieldKey="energy_label" draft={draft} onChange={setDraftField} />
+              </>) : (<>
+                <Field label="Building"      value={connState.building} />
+                <Field label="Energy label"   value={connState.energy_label} />
+              </>)}
             </Section>
 
             <Section title="Characteristics" defaultOpen={false}>
-              <Field label="Usage category"          value={conn.usage_category} />
-              <Field label="Usage type"              value={conn.usage_type} />
-              <Field label="Market segment code"     value={conn.market_seg_code} />
-              <Field label="Monitoring"              value={conn.monitoring} />
+              {showEdit ? (<>
+                <EField label="Usage category"   fieldKey="usage_category" draft={draft} onChange={setDraftField} />
+                <EField label="Usage type"        fieldKey="usage_type"     draft={draft} onChange={setDraftField} />
+                <EField label="Monitoring"        fieldKey="monitoring"     draft={draft} onChange={setDraftField} />
+              </>) : (<>
+                <Field label="Usage category"    value={connState.usage_category} />
+                <Field label="Usage type"         value={connState.usage_type} />
+                <Field label="Market segment code" value={connState.market_seg_code} />
+                <Field label="Monitoring"         value={connState.monitoring} />
+              </>)}
             </Section>
 
             <Section title="Grid Management" defaultOpen={false}>
-              <Field label="Market segment"          value={conn.market_segment} />
-              <Field label="Telemetry"               value={conn.telemetry} />
-              <Field label="Characteristic"          value={conn.characteristic} />
-              <Field label="Connection value"        value={conn.connection_value} />
-              <Field label="Profile category"        value={conn.profile_category} />
-              <Field label="Grid operator"           value={conn.grid_operator} />
-              <Field label="Connection start"        value={conn.connection_start} />
+              {showEdit ? (<>
+                <EField label="Market segment"    fieldKey="market_segment"    draft={draft} onChange={setDraftField} />
+                <EField label="Telemetry"          fieldKey="telemetry"          draft={draft} onChange={setDraftField} />
+                <EField label="Connection value"   fieldKey="connection_value"   draft={draft} onChange={setDraftField} />
+                <EField label="Profile category"   fieldKey="profile_category"   draft={draft} onChange={setDraftField} />
+                <EField label="Grid operator"      fieldKey="grid_operator"      draft={draft} onChange={setDraftField} />
+                <EField label="Connection start"   fieldKey="connection_start"   draft={draft} onChange={setDraftField} />
+              </>) : (<>
+                <Field label="Market segment"     value={connState.market_segment} />
+                <Field label="Telemetry"           value={connState.telemetry} />
+                <Field label="Characteristic"      value={connState.characteristic} />
+                <Field label="Connection value"    value={connState.connection_value} />
+                <Field label="Profile category"    value={connState.profile_category} />
+                <Field label="Grid operator"       value={connState.grid_operator} />
+                <Field label="Connection start"    value={connState.connection_start} />
+              </>)}
             </Section>
 
             <Section title="Supplier" defaultOpen={false}>
-              <Field label="Vacancy"                 value={conn.vacancy ? 'Yes' : 'No'} />
-              <Field label="Status"                  value={conn.status} />
-              <Field label="Active on"               value={conn.active_on} />
-              <Field label="Supplier"                value={conn.supplier} />
-              <Field label="Supplier contract"       value={conn.supplier_contract} />
+              {showEdit ? (<>
+                <EField label="Status"            fieldKey="status"            draft={draft} onChange={setDraftField} options={['Active','Inactive','Pending']} />
+                <EField label="Supplier"           fieldKey="supplier"          draft={draft} onChange={setDraftField} />
+                <EField label="Supplier contract"  fieldKey="supplier_contract" draft={draft} onChange={setDraftField} />
+                <EField label="Active on"          fieldKey="active_on"         draft={draft} onChange={setDraftField} />
+                <EField label="Active since"       fieldKey="active_since"      draft={draft} onChange={setDraftField} />
+                <EField label="Contract"           fieldKey="contract"          draft={draft} onChange={setDraftField} />
+              </>) : (<>
+                <Field label="Vacancy"             value={connState.vacancy ? 'Yes' : 'No'} />
+                <Field label="Status"              value={connState.status} />
+                <Field label="Active on"           value={connState.active_on} />
+                <Field label="Supplier"            value={connState.supplier} />
+                <Field label="Supplier contract"   value={connState.supplier_contract} />
+              </>)}
             </Section>
 
             <Section title="Consumption" defaultOpen={false}>
-              <Field label={`Low (standard, ${unit}/yr)`}    value={conn.usage_low   > 0 ? conn.usage_low.toLocaleString()   : '—'} />
-              <Field label={`Normal (standard, ${unit}/yr)`} value={conn.usage_normal > 0 ? conn.usage_normal.toLocaleString() : '—'} />
-              <Field label={`Target usage (${unit}/yr)`}     value={conn.target_usage > 0 ? conn.target_usage.toLocaleString() : '—'} />
+              {showEdit ? (<>
+                <EField label={`Low (${unit}/yr)`}    fieldKey="usage_low"    draft={draft} onChange={setDraftField} type="number" />
+                <EField label={`Normal (${unit}/yr)`} fieldKey="usage_normal" draft={draft} onChange={setDraftField} type="number" />
+                <EField label={`Target (${unit}/yr)`} fieldKey="target_usage" draft={draft} onChange={setDraftField} type="number" />
+              </>) : (<>
+                <Field label={`Low (${unit}/yr)`}    value={connState.usage_low   > 0 ? connState.usage_low.toLocaleString()   : '—'} />
+                <Field label={`Normal (${unit}/yr)`} value={connState.usage_normal > 0 ? connState.usage_normal.toLocaleString() : '—'} />
+                <Field label={`Target (${unit}/yr)`} value={connState.target_usage > 0 ? connState.target_usage.toLocaleString() : '—'} />
+              </>)}
             </Section>
 
             <Section title="Monitoring" defaultOpen={false}>
-              <Field label="Monitoring type"         value={conn.monitoring_type} />
-              <Field label="Monitoring start"        value={conn.monitoring_start} />
-              <Field label="Available data"          value={conn.data_available} />
-              <Field label="Measurement company"     value={conn.measurement_company} />
+              {showEdit ? (<>
+                <EField label="Monitoring type"      fieldKey="monitoring_type"      draft={draft} onChange={setDraftField} />
+                <EField label="Monitoring start"     fieldKey="monitoring_start"     draft={draft} onChange={setDraftField} />
+                <EField label="Data available"       fieldKey="data_available"       draft={draft} onChange={setDraftField} />
+                <EField label="Measurement company"  fieldKey="measurement_company"  draft={draft} onChange={setDraftField} />
+              </>) : (<>
+                <Field label="Monitoring type"       value={connState.monitoring_type} />
+                <Field label="Monitoring start"      value={connState.monitoring_start} />
+                <Field label="Available data"        value={connState.data_available} />
+                <Field label="Measurement company"   value={connState.measurement_company} />
+              </>)}
             </Section>
 
             <Section title="Financial" defaultOpen={false}>
-              <Field label="Tax cluster"             value={conn.tax_cluster_label} />
-              <Field label="Cost center"             value={conn.cost_center} />
-              <Field label="Rubricering"             value={conn.rubricering} />
-              <Field label="Costs"                   value={conn.costs} />
+              {showEdit ? (<>
+                <EField label="Cost center"  fieldKey="cost_center"  draft={draft} onChange={setDraftField} />
+                <EField label="Tax cluster"   fieldKey="tax_cluster"  draft={draft} onChange={setDraftField} />
+                <EField label="Rubricering"   fieldKey="rubricering"  draft={draft} onChange={setDraftField} />
+                <EField label="Costs"         fieldKey="costs"        draft={draft} onChange={setDraftField} />
+              </>) : (<>
+                <Field label="Tax cluster"   value={connState.tax_cluster_label} />
+                <Field label="Cost center"    value={connState.cost_center} />
+                <Field label="Rubricering"    value={connState.rubricering} />
+                <Field label="Costs"          value={connState.costs} />
+              </>)}
             </Section>
 
             <Section title="Comments" defaultOpen={false}>
-              {conn.remarks
-                ? <p className="text-[11px] text-white/60 leading-relaxed">{conn.remarks}</p>
-                : <p className="text-[11px] text-white/25 italic">No comments.</p>
-              }
+              {showEdit ? (
+                <textarea value={String(draft.remarks ?? '')} onChange={e => setDraftField('remarks', e.target.value)}
+                  rows={4} className="w-full bg-bg-primary border border-border-subtle/60 text-white/80 text-[11px] rounded px-2 py-1.5 focus:outline-none focus:border-accent resize-none" />
+              ) : (
+                connState.remarks
+                  ? <p className="text-[11px] text-white/60 leading-relaxed">{connState.remarks}</p>
+                  : <p className="text-[11px] text-white/25 italic">No comments.</p>
+              )}
             </Section>
 
           </div>
@@ -986,43 +1087,39 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
               <MiniMap lat={conn.latitude} lon={conn.longitude} color={color} />
             </div>
 
-            {/* Status log — auto-populated on every save, read-only */}
+            {/* Change log — auto-populated on every save, read-only */}
             <div className="card p-0 overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border-subtle">
                 <AlertCircle size={12} className="text-accent" />
-                <span className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest">Status History</span>
+                <span className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest">Change Log</span>
                 <span className="ml-auto text-[10px] text-white/25">auto-updated on save</span>
               </div>
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="border-b border-border-subtle">
-                    {['Date', 'Status', 'Supplier', 'Changed by'].map(h => (
-                      <th key={h} className="tbl-th text-[10px]">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {statusLog.length === 0 && (
-                    <tr><td colSpan={4} className="tbl-td text-center text-white/25 py-4 italic">No changes recorded yet — edit and save to start tracking</td></tr>
-                  )}
-                  {[...statusLog].reverse().map((r, i) => (
-                    <tr key={i} className="border-b border-border-subtle hover:bg-bg-card/50">
-                      <td className="tbl-td font-mono text-white/50">{r.date}</td>
-                      <td className="tbl-td">
-                        <span className={clsx(
-                          'text-[10px] px-2 py-0.5 rounded-full font-medium',
-                          r.status === 'Active'     && 'bg-success/15 text-success-light',
-                          r.status === 'Inactive'   && 'bg-danger/15 text-danger-light',
-                          r.status === 'Pending'    && 'bg-warning/15 text-warning-light',
-                          r.status === 'Terminated' && 'bg-white/10 text-white/40',
-                        )}>{r.status}</span>
-                      </td>
-                      <td className="tbl-td text-white/60">{r.supplier}</td>
-                      <td className="tbl-td text-white/40">{r.by}</td>
-                    </tr>
+              {changeLog.length === 0 ? (
+                <p className="text-center text-white/25 italic text-[11px] py-4">No changes recorded yet — edit and save to start tracking</p>
+              ) : (
+                <div className="divide-y divide-border-subtle">
+                  {[...changeLog].reverse().map((entry, i) => (
+                    <div key={i} className="px-4 py-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-mono text-[10px] text-white/40">{entry.date}</span>
+                        <span className="text-[10px] text-white/30">·</span>
+                        <span className="text-[10px] text-white/50">{entry.by}</span>
+                        <span className="ml-auto text-[10px] text-white/25">{entry.fields.length} field{entry.fields.length !== 1 ? 's' : ''} changed</span>
+                      </div>
+                      <div className="space-y-1">
+                        {entry.fields.map((f, j) => (
+                          <div key={j} className="flex items-baseline gap-2 text-[11px]">
+                            <span className="text-white/40 w-[120px] min-w-[120px] truncate">{f.field}</span>
+                            <span className="text-red-400/60 line-through truncate max-w-[80px]">{f.from || '—'}</span>
+                            <span className="text-white/30">→</span>
+                            <span className="text-emerald-400/80 truncate max-w-[80px]">{f.to || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
 
             {/* Energy meters */}
