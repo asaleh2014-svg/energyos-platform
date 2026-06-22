@@ -561,10 +561,24 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
 
     const newLog = [...changeLog, { date: today, by: 'User', fields: changed }]
 
+    // Only send columns that actually exist in energy_connections
+    const DB_COLUMNS: (keyof FullConnection)[] = [
+      'status', 'supplier', 'contract', 'active_since', 'grid_operator',
+      'usage_category', 'remarks', 'meter_number', 'address', 'department',
+      'connection_type', 'product',
+    ]
+    const dbUpdate: Record<string, unknown> = { status_log: newLog }
+    for (const col of DB_COLUMNS) {
+      if (draft[col] !== undefined) dbUpdate[col] = draft[col]
+    }
+    // Map FullConnection fields → DB column names where they differ
+    if (draft.connection_value !== undefined) dbUpdate['capacity'] = draft.connection_value
+    if (draft.building         !== undefined) dbUpdate['building_name'] = draft.building
+
     setSaving(true)
     await supabase
       .from('energy_connections')
-      .update({ ...draft, status_log: newLog })
+      .update(dbUpdate)
       .eq('id', conn.id)
     setSaving(false)
 
