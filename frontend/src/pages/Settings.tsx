@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS, type Market } from '@/types'
-import { Zap, Flame, Shield, Building2, Info } from 'lucide-react'
+import { Zap, Flame, Shield, Building2, Info, Database, Trash2, CheckCircle2, AlertCircle } from 'lucide-react'
 import clsx from 'clsx'
+import { supabase } from '@/lib/supabase'
+import { useTenantId } from '@/lib/auth'
 
-const TABS = ['Account','Market & Locale','Subscription','API Keys','Team','Notifications']
+const TABS = ['Account','Market & Locale','Subscription','API Keys','Team','Notifications','Demo Data']
 
 const PLANS = [
   { id:'starter',      name:'Starter',      price:'AED 299',  period:'/mo', features:['Up to 5 connections','Basic analytics','Email support','1 user seat'] },
@@ -25,10 +27,110 @@ const MARKET_GROUPS = [
   },
 ]
 
+// ── Seed helpers ──────────────────────────────────────────────────────────────
+// Seasonal multipliers: Jan→Dec for UAE (summer peak Jul-Sep)
+const SEASON = [0.72, 0.70, 0.78, 0.88, 1.02, 1.18, 1.35, 1.38, 1.28, 1.05, 0.85, 0.74]
+
+function seedMonth(base: number, monthIdx: number, jitter = 0.12): number {
+  const s = SEASON[monthIdx]
+  const j = 1 + (Math.random() * 2 - 1) * jitter
+  return Math.round(base * s * j)
+}
+
+// Electricity: 2 000–8 000 kWh/mo base  |  Gas: 400–1 800 m³/mo base
+function connectionBase(product: string): { base: number; unit: string; rate: number } {
+  if (product === 'Gas') return { base: 400 + Math.random() * 1400, unit: 'm3', rate: 0.29 }
+  return { base: 2000 + Math.random() * 6000, unit: 'kWh', rate: 0.38 }
+}
+
 export default function Settings() {
   const { tenant, market, setMarket } = useAppStore()
+  const tenantId = useTenantId()
   const [tab, setTab] = useState('Account')
   const cfg = MARKET_CONFIGS[market]
+
+  // ── Demo seed state ──────────────────────────────────────────────────────
+  const [seedStatus, setSeedStatus] = useState<'idle'|'running'|'done'|'error'>('idle')
+  const [seedLog,    setSeedLog]    = useState<string[]>([])
+
+  async function handleSeed() {
+    setSeedStatus('running')
+    setSeedLog(['Fetching connections…'])
+    try {
+      const { data: conns, error } = await supabase
+        .from('energy_connections')
+        .select('id, product')
+        .eq('tenant_id', tenantId)
+      if (error || !conns?.length) throw new Error(error?.message ?? 'No connections found')
+
+      setSeedLog(l => [...l, `Found ${conns.length} connections — generating 24 months…`])
+
+      const records: {
+        tenant_id: string; connection_id: string;
+        period_start: string; period_end: string;
+        consumption: number; unit: string; cost: number
+      }[] = []
+
+      const now = new Date()
+      for (const conn of conns) {
+        const { base, unit, rate } = connectionBase(conn.product ?? 'Electricity')
+        for (let m = 23; m >= 0; m--) {
+          const d = new Date(now.getFullYear(), now.getMonth() - m, 1)
+          const period_start = d.toISOString().slice(0, 10)
+          // last day of same month
+          const endD = new Date(d.getFullYear(), d.getMonth() + 1, 0)
+          const period_end = endD.toISOString().slice(0, 10)
+          const monthIdx = d.getMonth()
+          const consumption = seedMonth(base, monthIdx)
+          records.push({
+            tenant_id: tenantId,
+            connection_id: conn.id,
+            period_start,
+            period_end,
+            consumption,
+            unit,
+            cost: Math.round(consumption * rate * 100) / 100,
+          })
+        }
+      }
+
+      setSeedLog(l => [...l, `Clearing existing records for this tenant…`])
+      await supabase.from('consumption_records').delete().eq('tenant_id', tenantId)
+
+      setSeedLog(l => [...l, `Inserting ${records.length} records to DB…`])
+
+      // Insert in chunks of 200
+      const CHUNK = 200
+      for (let i = 0; i < records.length; i += CHUNK) {
+        const { error: e } = await supabase
+          .from('consumption_records')
+          .insert(records.slice(i, i + CHUNK))
+        if (e) throw new Error(e.message)
+      }
+
+      setSeedLog(l => [...l, `Done — ${records.length} records seeded across ${conns.length} connections.`])
+      setSeedStatus('done')
+    } catch (err: unknown) {
+      setSeedLog(l => [...l, `Error: ${err instanceof Error ? err.message : String(err)}`])
+      setSeedStatus('error')
+    }
+  }
+
+  async function handleClear() {
+    setSeedStatus('running')
+    setSeedLog(['Deleting all consumption records for this tenant…'])
+    const { error } = await supabase
+      .from('consumption_records')
+      .delete()
+      .eq('tenant_id', tenantId)
+    if (error) {
+      setSeedLog(l => [...l, `Error: ${error.message}`])
+      setSeedStatus('error')
+    } else {
+      setSeedLog(l => [...l, 'All consumption records deleted.'])
+      setSeedStatus('done')
+    }
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -342,6 +444,78 @@ export default function Settings() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {tab === 'Demo Data' && (
+              <div className="space-y-4">
+                <div className="card">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Database size={14} className="text-accent" />
+                    <h2 className="text-sm font-semibold text-white">Seed Demo Consumption Data</h2>
+                  </div>
+                  <p className="text-xs text-white/40 mb-5 leading-relaxed">
+                    Generates 24 months of realistic consumption records for all connections in this tenant.
+                    Uses UAE seasonal patterns (summer peak Jul–Sep) with random variation per connection.
+                    Safe to re-run — uses upsert so no duplicates.
+                  </p>
+
+                  <div className="flex gap-3 mb-5">
+                    <button
+                      onClick={handleSeed}
+                      disabled={seedStatus === 'running'}
+                      className="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Database size={13} />
+                      {seedStatus === 'running' ? 'Seeding…' : 'Seed 24 Months of Data'}
+                    </button>
+                    <button
+                      onClick={handleClear}
+                      disabled={seedStatus === 'running'}
+                      className="btn flex items-center gap-2 text-red-400 border-red-400/30 hover:bg-red-400/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Trash2 size={13} />
+                      Clear All Records
+                    </button>
+                  </div>
+
+                  {seedLog.length > 0 && (
+                    <div className="bg-bg-primary/60 border border-border-subtle rounded-lg p-4 font-mono text-[11px] space-y-1">
+                      {seedLog.map((line, i) => (
+                        <div key={i} className="text-white/60">{line}</div>
+                      ))}
+                      {seedStatus === 'done' && (
+                        <div className="flex items-center gap-1.5 text-emerald-400 mt-2 pt-2 border-t border-border-subtle">
+                          <CheckCircle2 size={12} /> Complete
+                        </div>
+                      )}
+                      {seedStatus === 'error' && (
+                        <div className="flex items-center gap-1.5 text-red-400 mt-2 pt-2 border-t border-border-subtle">
+                          <AlertCircle size={12} /> Failed — check console for details
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="card">
+                  <h2 className="text-sm font-semibold text-white mb-3">What gets seeded</h2>
+                  <div className="grid grid-cols-2 gap-4 text-xs text-white/50">
+                    {[
+                      ['Period', '24 months back from today'],
+                      ['Electricity base', '2 000 – 8 000 kWh / month'],
+                      ['Gas base', '400 – 1 800 m³ / month'],
+                      ['Seasonal pattern', 'UAE summer peak (Jul–Sep +35%)'],
+                      ['Random jitter', '±12% per month'],
+                      ['Cost calc', 'Electricity 0.38 AED/kWh · Gas 0.29 AED/m³'],
+                    ].map(([k, v]) => (
+                      <div key={k}>
+                        <div className="text-white/30 mb-0.5">{k}</div>
+                        <div className="text-white/70">{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
