@@ -101,9 +101,62 @@ function makeConsumptionData(conn: FullConnection, period: Period) {
 }
 
 // ─── Log types ────────────────────────────────────────────────────────────────
-interface CapacityEntry  { date: string; value: string; old: string; by: string; on: string }
-interface StatusEntry    { date: string; status: string; supplier: string; by: string }
-interface ReadingEntry   { date: string; normal: number; low: number; source: string }
+interface StatusEntry  { date: string; status: string; supplier: string; by: string }
+interface ReadingEntry { date: string; normal: number; low: number; source: string }
+
+// ─── Quick-edit panel for key connection fields ───────────────────────────────
+function EditConnectionPanel({
+  conn, onSave, onCancel,
+}: {
+  conn: FullConnection
+  onSave: (changes: Partial<FullConnection>) => Promise<void>
+  onCancel: () => void
+}) {
+  const [status,   setStatus]   = useState<'Active' | 'Inactive' | 'Pending'>(conn.status ?? 'Active')
+  const [supplier, setSupplier] = useState(conn.supplier ?? '')
+  const [contract, setContract] = useState(conn.contract ?? '')
+  const [saving,   setSaving]   = useState(false)
+
+  async function handleSave() {
+    setSaving(true)
+    await onSave({ status, supplier, contract })
+    setSaving(false)
+  }
+
+  return (
+    <div className="card space-y-3 border border-accent/20">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-accent-hover uppercase tracking-widest">Edit Connection</span>
+        <button onClick={onCancel} className="text-white/30 hover:text-white/60 transition-colors"><X size={14} /></button>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-[10px] text-white/40 uppercase tracking-widest block mb-1">Status</label>
+          <select value={status} onChange={e => setStatus(e.target.value as 'Active' | 'Inactive' | 'Pending')} className="form-select w-full text-sm">
+            <option>Active</option>
+            <option>Inactive</option>
+            <option>Pending</option>
+            <option>Terminated</option>
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] text-white/40 uppercase tracking-widest block mb-1">Supplier</label>
+          <input value={supplier} onChange={e => setSupplier(e.target.value)} className="form-input w-full text-sm" />
+        </div>
+        <div>
+          <label className="text-[10px] text-white/40 uppercase tracking-widest block mb-1">Contract</label>
+          <input value={contract} onChange={e => setContract(e.target.value)} className="form-input w-full text-sm" />
+        </div>
+      </div>
+      <div className="flex gap-2 justify-end pt-1">
+        <button onClick={onCancel} className="text-xs text-white/40 hover:text-white/70 px-3 py-1.5 border border-border-subtle rounded-lg transition-colors">Cancel</button>
+        <button onClick={handleSave} disabled={saving} className="text-xs text-emerald-400 hover:text-emerald-300 px-3 py-1.5 border border-emerald-500/30 rounded-lg transition-colors">
+          {saving ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 // ─── Inline editable log ──────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -453,32 +506,56 @@ interface Props {
 export default function ConnectionDetail({ conn, onClose }: Props) {
   const tenantId = useTenantId()
   const color = PRODUCT_COLOR[conn.product] ?? '#6b7280'
-  const [energyUnit,   setEnergyUnit]   = useState<'kWh' | 'MWh'>('kWh')
-  const [showTable,    setShowTable]    = useState(false)
-  const [period,       setPeriod]       = useState<Period>(DEFAULT_PERIOD)
-  const [dbRecords,    setDbRecords]    = useState<{ period_start: string; consumption: number }[] | null>(null)
-  const [capacityLog,  setCapacityLog]  = useState<CapacityEntry[]>([])
-  const [statusLog,    setStatusLog]    = useState<StatusEntry[]>([])
-  const [meterReadings,setMeterReadings]= useState<ReadingEntry[]>([])
+  const [energyUnit,    setEnergyUnit]    = useState<'kWh' | 'MWh'>('kWh')
+  const [showTable,     setShowTable]     = useState(false)
+  const [period,        setPeriod]        = useState<Period>(DEFAULT_PERIOD)
+  const [dbRecords,     setDbRecords]     = useState<{ period_start: string; consumption: number }[] | null>(null)
+  const [statusLog,     setStatusLog]     = useState<StatusEntry[]>([])
+  const [meterReadings, setMeterReadings] = useState<ReadingEntry[]>([])
+  const [showEdit,      setShowEdit]      = useState(false)
+  const [connState,     setConnState]     = useState(conn)
 
   // Fetch logs from DB
   useEffect(() => {
     if (!conn.id) return
     supabase
       .from('energy_connections')
-      .select('capacity_log, status_log, meter_readings')
+      .select('status_log, meter_readings')
       .eq('id', conn.id)
       .single()
       .then(({ data }) => {
         if (!data) return
-        setCapacityLog(data.capacity_log ?? [])
         setStatusLog(data.status_log ?? [])
         setMeterReadings(data.meter_readings ?? [])
       })
   }, [conn.id])
 
-  async function saveLog(field: 'capacity_log' | 'status_log' | 'meter_readings', rows: unknown[]) {
+  async function saveLog(field: 'status_log' | 'meter_readings', rows: unknown[]) {
     await supabase.from('energy_connections').update({ [field]: rows }).eq('id', conn.id)
+  }
+
+  async function handleEditSave(changes: Partial<FullConnection>) {
+    const today = new Date().toISOString().slice(0, 10)
+    const newLog = [...statusLog]
+
+    // Auto-append to status log if status or supplier changed
+    if (changes.status !== connState.status || changes.supplier !== connState.supplier) {
+      newLog.push({
+        date:     today,
+        status:   changes.status   ?? connState.status   ?? '',
+        supplier: changes.supplier ?? connState.supplier ?? '',
+        by:       'User',
+      })
+    }
+
+    await supabase
+      .from('energy_connections')
+      .update({ ...changes, status_log: newLog })
+      .eq('id', conn.id)
+
+    setConnState(prev => ({ ...prev, ...changes }))
+    setStatusLog(newLog)
+    setShowEdit(false)
   }
 
   const isElec = conn.product === 'Electricity'
@@ -578,30 +655,34 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
                 </span>
                 <span className={clsx(
                   'text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0',
-                  conn.status === 'Active'   && 'bg-success/15 text-success-light',
-                  conn.status === 'Inactive' && 'bg-danger/15 text-danger-light',
-                  conn.status === 'Pending'  && 'bg-warning/15 text-warning-light',
+                  connState.status === 'Active'   && 'bg-success/15 text-success-light',
+                  connState.status === 'Inactive' && 'bg-danger/15 text-danger-light',
+                  connState.status === 'Pending'  && 'bg-warning/15 text-warning-light',
                 )}>
-                  {conn.status}
+                  {connState.status}
                 </span>
               </div>
               <div className="text-[11px] text-white/45 mt-0.5 font-mono">{conn.ean_code}</div>
               <div className="text-[11px] text-white/40 mt-0.5">
-                Active since <span className="text-accent-hover">{conn.active_since}</span> with <span className="text-white/60">{conn.supplier}</span>
-                {conn.contract && <> · Contract: <span className="text-white/55">{conn.contract}</span></>}
+                Active since <span className="text-accent-hover">{conn.active_since}</span> with <span className="text-white/60">{connState.supplier}</span>
+                {connState.contract && <> · Contract: <span className="text-white/55">{connState.contract}</span></>}
               </div>
             </div>
 
             {/* Action icons */}
             <div className="flex items-center gap-1 flex-shrink-0">
               {[
-                { Icon: Edit2,    title: 'Edit' },
-                { Icon: Maximize2,title: 'Expand' },
-                { Icon: Printer,  title: 'Print' },
-                { Icon: History,  title: 'History' },
-              ].map(({ Icon, title }) => (
-                <button key={title} title={title}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors">
+                { Icon: Edit2,    title: 'Edit',    onClick: () => setShowEdit(v => !v) },
+                { Icon: Maximize2,title: 'Expand',  onClick: undefined },
+                { Icon: Printer,  title: 'Print',   onClick: undefined },
+                { Icon: History,  title: 'History', onClick: undefined },
+              ].map(({ Icon, title, onClick }) => (
+                <button key={title} title={title} onClick={onClick}
+                  className={clsx('w-8 h-8 flex items-center justify-center rounded-lg transition-colors',
+                    title === 'Edit' && showEdit
+                      ? 'text-accent bg-accent/15'
+                      : 'text-white/40 hover:text-white/70 hover:bg-white/10'
+                  )}>
                   <Icon size={15} />
                 </button>
               ))}
@@ -612,6 +693,17 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
             </div>
           </div>
         </div>
+
+        {/* ── Edit panel ────────────────────────────────────────────────── */}
+        {showEdit && (
+          <div className="px-4 py-3 border-b border-border-subtle bg-bg-primary/40">
+            <EditConnectionPanel
+              conn={connState}
+              onSave={handleEditSave}
+              onCancel={() => setShowEdit(false)}
+            />
+          </div>
+        )}
 
         {/* ── Body (two columns) ─────────────────────────────────────────── */}
         <div className="flex flex-1 overflow-hidden">
@@ -709,21 +801,6 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
 
           {/* Right column — charts & data */}
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-
-            {/* Contract capacity log */}
-            <EditableLog<CapacityEntry>
-              title="Contract Capacity Log"
-              rows={capacityLog}
-              columns={[
-                { key: 'date',  label: 'Effective' },
-                { key: 'value', label: 'Value' },
-                { key: 'old',   label: 'Previous' },
-                { key: 'by',    label: 'Changed by' },
-                { key: 'on',    label: 'Changed on' },
-              ]}
-              emptyRow={{ date: '', value: '', old: '—', by: '', on: '' }}
-              onSave={rows => { setCapacityLog(rows); return saveLog('capacity_log', rows) }}
-            />
 
             {/* Consumption chart */}
             <div>
@@ -909,19 +986,44 @@ export default function ConnectionDetail({ conn, onClose }: Props) {
               <MiniMap lat={conn.latitude} lon={conn.longitude} color={color} />
             </div>
 
-            {/* Status log */}
-            <EditableLog<StatusEntry>
-              title="Status Log"
-              rows={statusLog}
-              columns={[
-                { key: 'date',     label: 'Date' },
-                { key: 'status',   label: 'Status' },
-                { key: 'supplier', label: 'Supplier' },
-                { key: 'by',       label: 'Changed by' },
-              ]}
-              emptyRow={{ date: '', status: 'Active', supplier: conn.supplier ?? '', by: '' }}
-              onSave={rows => { setStatusLog(rows); return saveLog('status_log', rows) }}
-            />
+            {/* Status log — auto-populated on every save, read-only */}
+            <div className="card p-0 overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border-subtle">
+                <AlertCircle size={12} className="text-accent" />
+                <span className="text-[10px] font-semibold text-accent-hover uppercase tracking-widest">Status History</span>
+                <span className="ml-auto text-[10px] text-white/25">auto-updated on save</span>
+              </div>
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="border-b border-border-subtle">
+                    {['Date', 'Status', 'Supplier', 'Changed by'].map(h => (
+                      <th key={h} className="tbl-th text-[10px]">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {statusLog.length === 0 && (
+                    <tr><td colSpan={4} className="tbl-td text-center text-white/25 py-4 italic">No changes recorded yet — edit and save to start tracking</td></tr>
+                  )}
+                  {[...statusLog].reverse().map((r, i) => (
+                    <tr key={i} className="border-b border-border-subtle hover:bg-bg-card/50">
+                      <td className="tbl-td font-mono text-white/50">{r.date}</td>
+                      <td className="tbl-td">
+                        <span className={clsx(
+                          'text-[10px] px-2 py-0.5 rounded-full font-medium',
+                          r.status === 'Active'     && 'bg-success/15 text-success-light',
+                          r.status === 'Inactive'   && 'bg-danger/15 text-danger-light',
+                          r.status === 'Pending'    && 'bg-warning/15 text-warning-light',
+                          r.status === 'Terminated' && 'bg-white/10 text-white/40',
+                        )}>{r.status}</span>
+                      </td>
+                      <td className="tbl-td text-white/60">{r.supplier}</td>
+                      <td className="tbl-td text-white/40">{r.by}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             {/* Energy meters */}
             <div>
