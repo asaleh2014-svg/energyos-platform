@@ -9,10 +9,15 @@ export function tid(tenantId: string) { return tenantId || TENANT }
 export async function fetchSites(tenantId: string) {
   const { data } = await supabase
     .from('sites')
-    .select('id, name, status, city_id, cities(name, countries(name, code, currency))')
+    .select('id, name, status, latitude, longitude, city_id, cities(name, countries(name, code, currency))')
     .eq('tenant_id', tid(tenantId))
     .order('name')
-  return (data ?? []) as any[]
+  return (data ?? []).map((s: any) => ({
+    ...s,
+    city:    s.cities?.name ?? '',
+    country: s.cities?.countries?.name ?? '',
+    connections_count: 0,
+  })) as any[]
 }
 
 // ── Connections ────────────────────────────────────────────────────────────────
