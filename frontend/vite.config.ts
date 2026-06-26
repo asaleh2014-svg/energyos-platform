@@ -10,6 +10,10 @@ export default defineConfig({
   server: {
     port: 5173,
     allowedHosts: true,
+    headers: {
+      'X-Frame-Options': 'ALLOWALL',
+      'Content-Security-Policy': "frame-ancestors *"
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
