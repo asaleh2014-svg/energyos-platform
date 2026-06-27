@@ -20,8 +20,9 @@
   .status-active  { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-success-muted text-success-light; }
   .status-inactive { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-danger-muted text-danger-light; }
   .status-pending  { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-warning-muted text-warning-light; }
-  .type-elec { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-accent-muted text-accent-hover; }
-  .type-gas  { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-warning-muted text-warning-light; }
+  .type-elec  { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-accent-muted text-accent-hover; }
+  .type-gas   { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-warning-muted text-warning-light; }
+  .type-water { @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-cyan-900/40 text-cyan-300; }
   .card { @apply bg-bg-card border border-border-subtle rounded-xl p-5; }
   .card-hover { @apply card hover:border-border-default transition-colors cursor-pointer; }
   .btn-primary { @apply bg-accent hover:bg-accent-hover text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors; }

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { downloadCSV } from '@/lib/downloadUtils'
 import { Topbar } from '@/components/layout/Topbar'
 import { useSearchParams } from 'react-router-dom'
 import {
@@ -17,7 +18,7 @@ import AddConnectionPanel from '@/components/connections/AddConnectionPanel'
 import { supabase } from '@/lib/supabase'
 import { useTenantId } from '@/lib/auth'
 
-const PAGE_SIZE = 10
+const PAGE_SIZE_OPTIONS = [10, 25, 50]
 
 // ─── Map DB row → FullConnection shape ───────────────────────────────────────
 function dbRowToFullConnection(row: Record<string, unknown>): FullConnection {
@@ -264,6 +265,7 @@ export default function Connections() {
   const tenantId = useTenantId()
   const [filters, setFilters] = useState<Filters>(EMPTY)
   const [page, setPage]       = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list')
   const [selected, setSelected]   = useState<FullConnection | null>(null)
   const [adding,   setAdding]     = useState(false)
@@ -320,10 +322,10 @@ export default function Connections() {
     return true
   }), [filters, dbConnections])
 
-  const totalPages  = Math.ceil(filtered.length / PAGE_SIZE)
-  const pageItems   = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-  const from        = filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1
-  const to          = Math.min(page * PAGE_SIZE, filtered.length)
+  const totalPages  = Math.ceil(filtered.length / pageSize)
+  const pageItems   = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const from        = filtered.length === 0 ? 0 : (page - 1) * pageSize + 1
+  const to          = Math.min(page * pageSize, filtered.length)
   const activeFilters = (Object.entries(filters) as [keyof Filters, string][]).filter(([, v]) => v)
 
   const pageNumbers = useMemo(() => {
@@ -489,9 +491,29 @@ export default function Connections() {
                       {from}–{to} of {filtered.length} results
                     </span>
                   </div>
-                  <button className="flex items-center gap-1.5 text-xs border border-border-default text-white/60 hover:text-white px-3 py-1.5 rounded-lg transition-all">
-                    <Download size={12} /> Download
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={pageSize}
+                      onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}
+                      className="text-xs bg-bg-card border border-border-subtle text-white/60 rounded-lg px-2 py-1.5 cursor-pointer hover:border-accent focus:outline-none"
+                    >
+                      {PAGE_SIZE_OPTIONS.map(n => (
+                        <option key={n} value={n}>{n} per page</option>
+                      ))}
+                    </select>
+                    <button
+                      className="flex items-center gap-1.5 text-xs border border-border-default text-white/60 hover:text-white px-3 py-1.5 rounded-lg transition-all"
+                      onClick={() => downloadCSV('connections.csv', [
+                        ['Site','Product','Status','Supplier','EAN Code','Meter No.','Address'],
+                        ...filtered.map((c: any) => [
+                          c.site_name ?? '—', c.product ?? c.connection_type ?? '—',
+                          c.status ?? '—', c.supplier ?? '—', c.ean_code ?? '—',
+                          c.meter_number ?? '—', c.address ?? '—',
+                        ]),
+                      ])}>
+                      <Download size={12} /> Download CSV
+                    </button>
+                  </div>
                 </div>
 
                 <div className="card p-0 overflow-hidden">

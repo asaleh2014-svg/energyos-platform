@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useLegendToggle } from '@/lib/useLegendToggle'
 import { useNavigate } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
@@ -7,15 +8,18 @@ import { isDemoMode } from '@/lib/demo'
 import { supabase } from '@/lib/supabase'
 import { MARKET_CONFIGS, getMarketConfig, type Market } from '@/types'
 import { CO2_FACTORS, type ElecSource, MONTHS } from '@/lib/mockData'
+import { fetchSiteConsumption, groupByYear, fetchBuildings } from '@/lib/dbQueries'
+import { useYearFilter } from '@/lib/useYearFilter'
+import { YearSelector } from '@/components/YearSelector'
 import {
   MapPin, X, Search, Globe, CopyCheck, ChevronDown, ChevronUp,
   Plus, Building2, Zap, Loader2, Trash2, RefreshCw, AlertCircle,
-  Flame, ExternalLink, Hotel, ChevronRight, Table, DollarSign, Wind,
+  Flame, Droplets, ExternalLink, Hotel, ChevronRight, Table, DollarSign, Wind, Unplug,
 } from 'lucide-react'
+import { NoDataBadge } from '@/components/NoDataBadge'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
-import { mockBuildingsForSite, LABEL_COLORS } from '@/lib/buildingMocks'
 import { PeriodSelector, DEFAULT_PERIOD, type Period } from '@/components/PeriodSelector'
 import clsx from 'clsx'
 
@@ -37,70 +41,6 @@ function calcEmissionFactor(mix: ElecSource) {
 const MONTH_NAMES_S = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const SEASONAL_S    = [1.12,1.08,1.0,0.92,0.85,0.82,0.84,0.86,0.93,1.0,1.06,1.10]
 
-// ── Seeded mock consumption per site (period-aware) ────────────────────────────
-function siteConsumption(siteId: string, period?: Period) {
-  const seed = siteId.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
-  const baseElec = 8000 + (seed % 12000)   // kWh/month
-  const baseGas  = 200  + (seed % 800)     // m³/month
-  const rng = (i: number) => 0.90 + ((seed * (i+1) * 9301 + 49297) % 233280) / 233280 * 0.20
-
-  if (!period) {
-    return MONTH_NAMES_S.map((m, i) => ({
-      month: m,
-      elec: Math.round(baseElec * SEASONAL_S[i] * rng(i)),
-      gas:  Math.round(baseGas  * SEASONAL_S[i] * rng(i + 13)),
-    }))
-  }
-
-  const rows: { month: string; elec: number; gas: number }[] = []
-  const now = new Date()
-
-  // Daily granularity (single month)
-  if (period.granularity === 'day') {
-    const dayElec = baseElec / 30
-    const dayGas  = baseGas  / 30
-    const cur = new Date(period.from.getFullYear(), period.from.getMonth(), period.from.getDate())
-    const end = new Date(period.to.getFullYear(),   period.to.getMonth(),   period.to.getDate())
-    let idx = 0
-    while (cur <= end) {
-      const m = cur.getMonth()
-      rows.push({
-        month: `${cur.getDate()} ${MONTH_NAMES_S[m]}`,
-        elec:  Math.round(dayElec * SEASONAL_S[m] * rng(idx)),
-        gas:   Math.round(dayGas  * SEASONAL_S[m] * rng(idx + 13)),
-      })
-      cur.setDate(cur.getDate() + 1)
-      idx++
-    }
-    return rows
-  }
-
-  // Monthly granularity
-  const cur = new Date(period.from.getFullYear(), period.from.getMonth(), 1)
-  const end = new Date(period.to.getFullYear(),   period.to.getMonth(),   1)
-  let idx = 0
-  while (cur <= end) {
-    const m  = cur.getMonth()
-    const yr = cur.getFullYear()
-    const label = `${MONTH_NAMES_S[m]}${yr !== now.getFullYear() ? ` ${yr}` : ''}`
-    rows.push({
-      month: label,
-      elec: Math.round(baseElec * SEASONAL_S[m] * rng(idx)),
-      gas:  Math.round(baseGas  * SEASONAL_S[m] * rng(idx + 13)),
-    })
-    cur.setMonth(cur.getMonth() + 1)
-    idx++
-  }
-  return rows
-}
-
-function prevYearTotals(siteId: string) {
-  const rows = siteConsumption(siteId)
-  return {
-    elec: rows.reduce((a, r) => a + r.elec, 0),
-    gas:  rows.reduce((a, r) => a + r.gas,  0),
-  }
-}
 
 // ── Mix slider ─────────────────────────────────────────────────────────────────
 function MixSlider({ field, value, color, label, onChange }: {
@@ -129,6 +69,7 @@ interface SitePanelProps {
 
 function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
   const { siteMixes, setSiteMix } = useAppStore()
+  const tenantId = useTenantId()
   const navigate = useNavigate()
 
   const [mix, setMix] = useState<ElecSource>(siteMixes[site.id] ?? DEFAULT_MIX)
@@ -137,24 +78,78 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
   const [showConsTable,  setShowConsTable]  = useState(false)
   const [showCostTable,  setShowCostTable]  = useState(false)
   const [showEmitTable,  setShowEmitTable]  = useState(false)
+  const { onLegendClick: onConsLegend, isHidden: isConsHidden } = useLegendToggle()
+  const { onLegendClick: onCostLegend, isHidden: isCostHidden } = useLegendToggle()
+  const { onLegendClick: onEmitLegend, isHidden: isEmitHidden } = useLegendToggle()
+
+  // Real DB consumption data for this site
+  const [allMonthly, setAllMonthly] = useState<{ month: string; elec: number; gas: number; water: number; cost: number }[]>([])
+  const [loadingCons, setLoadingCons] = useState(true)
+  const [siteBuildings, setSiteBuildings] = useState<Awaited<ReturnType<typeof fetchBuildings>>>([])
+
+  useEffect(() => {
+    setLoadingCons(true)
+    Promise.all([
+      fetchSiteConsumption(tenantId, site.id),
+      fetchBuildings(tenantId, site.id),
+    ]).then(([rows, bldgs]) => {
+      setAllMonthly(rows)
+      setSiteBuildings(bldgs)
+      setLoadingCons(false)
+    })
+  }, [tenantId, site.id])
+
+  const MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const fmtMonth = (iso: string) => {
+    const [y, m] = iso.split('-')
+    const label = MO[parseInt(m,10)-1] ?? iso
+    return parseInt(y,10) !== new Date().getFullYear() ? `${label} ${y}` : label
+  }
+
+  // Apply period filter + granularity client-side
+  const consumption = useMemo(() => {
+    if (!allMonthly.length) return []
+    // allMonthly has month keys as "YYYY-MM" from groupByMonth
+    if (period.preset === 'all_years') {
+      // re-aggregate by year
+      const byYear: Record<string, { elec: number; gas: number; water: number; cost: number }> = {}
+      for (const r of allMonthly) {
+        const yr = r.month.slice(0, 4)
+        if (!byYear[yr]) byYear[yr] = { elec: 0, gas: 0, water: 0, cost: 0 }
+        byYear[yr].elec  += r.elec
+        byYear[yr].gas   += r.gas
+        byYear[yr].water += r.water
+        byYear[yr].cost  += r.cost
+      }
+      return Object.entries(byYear).sort().map(([yr, v]) => ({ month: yr, ...v }))
+    }
+    const from = `${period.from.getFullYear()}-${String(period.from.getMonth()+1).padStart(2,'0')}`
+    const to   = `${period.to.getFullYear()}-${String(period.to.getMonth()+1).padStart(2,'0')}`
+    return allMonthly
+      .filter(r => r.month >= from && r.month <= to)
+      .map(r => ({ ...r, month: fmtMonth(r.month) }))
+  }, [allMonthly, period])
+
+  const { years: consYears, selected: selectedConsYears, toggle: toggleConsYear, selectAll: selectAllConsYears, filtered: filteredConsumption } = useYearFilter(consumption)
+
+  const totals = useMemo(() => ({
+    elec:  allMonthly.reduce((a, r) => a + r.elec,  0),
+    gas:   allMonthly.reduce((a, r) => a + r.gas,   0),
+    water: allMonthly.reduce((a, r) => a + r.water, 0),
+  }), [allMonthly])
 
   const factor = calcEmissionFactor(mix)
   const factorColor = factor < 0.15 ? '#10b981' : factor < 0.35 ? '#f59e0b' : '#ef4444'
   const total = mix.gas_fired + mix.coal + mix.renewable + mix.mix
   const isValid = total === 100
 
-  const consumption = useMemo(() => siteConsumption(site.id, period), [site.id, period])
-  const totals = prevYearTotals(site.id)
+  const GAS_CO2 = 2.04  // kgCO₂ / m³
 
-  // Cost tariffs (UAE commercial)
-  const ELEC_TARIFF = 0.38  // AED / kWh
-  const GAS_TARIFF  = 3.20  // AED / m³
-  const GAS_CO2     = 2.04  // kgCO₂ / m³
-
+  // Cost comes from DB records (actual invoiced cost)
   const costData = useMemo(() => consumption.map(r => ({
     month:    r.month,
-    elecCost: Math.round(r.elec * ELEC_TARIFF),
-    gasCost:  Math.round(r.gas  * GAS_TARIFF),
+    elecCost: Math.round(r.cost * (r.elec / Math.max(r.elec + r.gas + r.water, 1))),
+    gasCost:  Math.round(r.cost * (r.gas  / Math.max(r.elec + r.gas + r.water, 1))),
   })), [consumption])
 
   const emissionsData = useMemo(() => consumption.map(r => ({
@@ -232,23 +227,30 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               <Zap size={12} className="text-blue-400" />
               <span className="text-xs font-semibold text-white/70 uppercase tracking-widest">Consumption</span>
+              {loadingCons && <Loader2 size={11} className="animate-spin text-white/30" />}
               <PeriodSelector value={period} onChange={setPeriod} />
               <button onClick={() => setShowConsTable(v => !v)}
                 className="flex items-center gap-1 text-[11px] text-white/40 hover:text-white/60 border border-border-subtle px-2 py-0.5 rounded-lg transition-colors ml-auto">
                 <Table size={10} /> {showConsTable ? 'Hide' : 'Table'}
               </button>
             </div>
+            {consYears.length > 1 && (
+              <div className="mb-2">
+                <YearSelector years={consYears} selected={selectedConsYears} onToggle={toggleConsYear} onAll={selectAllConsYears} />
+              </div>
+            )}
             <div className="card p-3">
               <ResponsiveContainer width="100%" height={160}>
-                <BarChart data={consumption} barGap={2} barCategoryGap="25%">
+                <BarChart data={filteredConsumption} barGap={2} barCategoryGap="25%">
                   <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" vertical={false} />
                   <XAxis dataKey="month" tick={{ fontSize: 9, fill: '#6b8fa3' }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 9, fill: '#6b8fa3' }} axisLine={false} tickLine={false}
                     tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
                   <Tooltip contentStyle={TT} />
-                  <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="elec" name="Elec (kWh)" fill="#3b82f6" opacity={0.85} radius={[2,2,0,0]} />
-                  <Bar dataKey="gas"  name="Gas (m³)"   fill="#f59e0b" opacity={0.75} radius={[2,2,0,0]} />
+                  <Legend iconSize={8} wrapperStyle={{ fontSize: 10, cursor: 'pointer' }} onClick={onConsLegend} />
+                  <Bar dataKey="elec"  name="Elec (kWh)"  fill="#3b82f6" opacity={0.85} radius={[2,2,0,0]} hide={isConsHidden('elec')} />
+                  <Bar dataKey="gas"   name="Gas (m³)"    fill="#f59e0b" opacity={0.75} radius={[2,2,0,0]} hide={isConsHidden('gas')} />
+                  <Bar dataKey="water" name="Water (m³)"  fill="#06b6d4" opacity={0.75} radius={[2,2,0,0]} hide={isConsHidden('water')} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -262,9 +264,15 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
                       <th className="tbl-th text-right">Gas (m³)</th>
                       <th className="tbl-th text-right">CO₂ (kg)</th>
                     </tr>
+                    <tr className="bg-bg-primary/70 border-b-2 border-border-default text-[10px]">
+                      <td className="tbl-td font-bold text-white/40">Total</td>
+                      <td className="tbl-td text-right font-bold font-mono text-blue-300">{filteredConsumption.reduce((a,r)=>a+r.elec,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-amber-300">{filteredConsumption.reduce((a,r)=>a+r.gas,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-white/50">{Math.round(filteredConsumption.reduce((a,r)=>a+r.elec,0)*factor).toLocaleString()}</td>
+                    </tr>
                   </thead>
                   <tbody>
-                    {consumption.map((r, i) => (
+                    {filteredConsumption.map((r, i) => (
                       <tr key={i} className="tbl-row">
                         <td className="tbl-td text-white/70">{r.month}</td>
                         <td className="tbl-td text-right font-mono text-blue-300">{r.elec.toLocaleString()}</td>
@@ -276,9 +284,9 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
                   <tfoot>
                     <tr className="border-t-2 border-border-default bg-bg-card">
                       <td className="tbl-td font-bold text-white/50">Total</td>
-                      <td className="tbl-td text-right font-bold font-mono text-blue-300">{consumption.reduce((a,r)=>a+r.elec,0).toLocaleString()}</td>
-                      <td className="tbl-td text-right font-bold font-mono text-amber-300">{consumption.reduce((a,r)=>a+r.gas,0).toLocaleString()}</td>
-                      <td className="tbl-td text-right font-bold font-mono text-white/50">{Math.round(consumption.reduce((a,r)=>a+r.elec,0)*factor).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-blue-300">{filteredConsumption.reduce((a,r)=>a+r.elec,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-amber-300">{filteredConsumption.reduce((a,r)=>a+r.gas,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-white/50">{Math.round(filteredConsumption.reduce((a,r)=>a+r.elec,0)*factor).toLocaleString()}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -305,9 +313,9 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
                   <YAxis tick={{ fontSize: 9, fill: '#6b8fa3' }} axisLine={false} tickLine={false}
                     tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
                   <Tooltip contentStyle={TT} formatter={(v: number) => [`AED ${v.toLocaleString()}`, '']} />
-                  <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="elecCost" name="Electricity (AED)" stackId="a" fill="#10b981" opacity={0.85} radius={[0,0,0,0]} />
-                  <Bar dataKey="gasCost"  name="Gas (AED)"          stackId="a" fill="#34d399" opacity={0.70} radius={[2,2,0,0]} />
+                  <Legend iconSize={8} wrapperStyle={{ fontSize: 10, cursor: 'pointer' }} onClick={onCostLegend} />
+                  <Bar dataKey="elecCost" name="Electricity (AED)" stackId="a" fill="#10b981" opacity={0.85} radius={[0,0,0,0]} hide={isCostHidden('elecCost')} />
+                  <Bar dataKey="gasCost"  name="Gas (AED)"          stackId="a" fill="#34d399" opacity={0.70} radius={[2,2,0,0]} hide={isCostHidden('gasCost')} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -320,6 +328,12 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
                       <th className="tbl-th text-right">Elec (AED)</th>
                       <th className="tbl-th text-right">Gas (AED)</th>
                       <th className="tbl-th text-right">Total (AED)</th>
+                    </tr>
+                    <tr className="bg-bg-primary/70 border-b-2 border-border-default text-[10px]">
+                      <td className="tbl-td font-bold text-white/40">Total</td>
+                      <td className="tbl-td text-right font-bold font-mono text-emerald-300">{costData.reduce((a,r)=>a+r.elecCost,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-emerald-300/60">{costData.reduce((a,r)=>a+r.gasCost,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-white">{costData.reduce((a,r)=>a+r.elecCost+r.gasCost,0).toLocaleString()}</td>
                     </tr>
                   </thead>
                   <tbody>
@@ -364,9 +378,9 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
                   <YAxis tick={{ fontSize: 9, fill: '#6b8fa3' }} axisLine={false} tickLine={false}
                     tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(1)}t` : String(v)} />
                   <Tooltip contentStyle={TT} formatter={(v: number) => [`${v.toLocaleString()} kg`, '']} />
-                  <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
-                  <Bar dataKey="elecCO2" name="Elec CO₂ (kg)" stackId="e" fill="#a855f7" opacity={0.85} radius={[0,0,0,0]} />
-                  <Bar dataKey="gasCO2"  name="Gas CO₂ (kg)"  stackId="e" fill="#c084fc" opacity={0.70} radius={[2,2,0,0]} />
+                  <Legend iconSize={8} wrapperStyle={{ fontSize: 10, cursor: 'pointer' }} onClick={onEmitLegend} />
+                  <Bar dataKey="elecCO2" name="Elec CO₂ (kg)" stackId="e" fill="#a855f7" opacity={0.85} radius={[0,0,0,0]} hide={isEmitHidden('elecCO2')} />
+                  <Bar dataKey="gasCO2"  name="Gas CO₂ (kg)"  stackId="e" fill="#c084fc" opacity={0.70} radius={[2,2,0,0]} hide={isEmitHidden('gasCO2')} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -380,6 +394,13 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
                       <th className="tbl-th text-right">Gas CO₂ (kg)</th>
                       <th className="tbl-th text-right">Total (kg)</th>
                       <th className="tbl-th text-right">tCO₂</th>
+                    </tr>
+                    <tr className="bg-bg-primary/70 border-b-2 border-border-default text-[10px]">
+                      <td className="tbl-td font-bold text-white/40">Total</td>
+                      <td className="tbl-td text-right font-bold font-mono text-purple-300">{emissionsData.reduce((a,r)=>a+r.elecCO2,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-purple-300/60">{emissionsData.reduce((a,r)=>a+r.gasCO2,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-white">{emissionsData.reduce((a,r)=>a+r.elecCO2+r.gasCO2,0).toLocaleString()}</td>
+                      <td className="tbl-td text-right font-bold font-mono text-white/50">{(emissionsData.reduce((a,r)=>a+r.elecCO2+r.gasCO2,0)/1000).toFixed(2)}</td>
                     </tr>
                   </thead>
                   <tbody>
@@ -461,44 +482,34 @@ function SitePanel({ site, city, citySiteIds, onClose }: SitePanelProps) {
           <div>
             <div className="text-xs font-semibold text-white/50 uppercase tracking-widest mb-3">Buildings</div>
             <div className="space-y-2">
-              {mockBuildingsForSite(site.id, 3).map(b => {
-                const eff = (b.elec_kwh_year / b.area_m2).toFixed(1)
-                const effColor = Number(eff) < 100 ? '#10b981' : Number(eff) < 200 ? '#f59e0b' : '#ef4444'
-                return (
-                  <div key={b.id}
-                    className="card bg-bg-secondary flex items-start justify-between gap-3 cursor-pointer hover:border-accent/30 transition-colors group"
-                    onClick={() => { onClose(); navigate(`/buildings/${b.id}`) }}>
-                    <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                      <div className="mt-0.5 w-8 h-6 rounded text-[10px] font-bold text-white flex items-center justify-center flex-shrink-0"
-                        style={{ background: LABEL_COLORS[b.energy_label] ?? '#6b7280' }}>
-                        {b.energy_label}
+              {siteBuildings.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border-subtle p-4 flex items-center gap-2 text-white/30 text-xs">
+                  <Building2 size={14} className="flex-shrink-0" />
+                  No buildings linked to this site yet
+                </div>
+              ) : siteBuildings.map(b => (
+                <div key={b.id}
+                  className="card bg-bg-secondary flex items-start justify-between gap-3 cursor-pointer hover:border-accent/30 transition-colors group"
+                  onClick={() => { onClose(); navigate(`/buildings/${b.id}`) }}>
+                  <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-white group-hover:text-accent-hover transition-colors">
+                        {b.name}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-white group-hover:text-accent-hover transition-colors">
-                          {b.name}
-                        </div>
-                        <div className="text-[10px] text-white/40 flex items-center gap-1 mt-0.5 truncate">
-                          <MapPin size={8} className="flex-shrink-0" /> {b.address}
-                        </div>
-                        <div className="flex items-center gap-3 mt-1.5">
-                          <span className="text-[10px] text-white/40">{b.area_m2.toLocaleString()} m²</span>
-                          <span className="text-[10px] font-mono" style={{ color: effColor }}>{eff} kWh/m²</span>
-                          <span className="text-[10px] text-blue-300 font-mono flex items-center gap-0.5">
-                            <Zap size={8} /> {(b.elec_kwh_year/1000).toFixed(0)}K kWh
-                          </span>
-                          <span className="text-[10px] text-amber-300 font-mono flex items-center gap-0.5">
-                            <Flame size={8} /> {b.gas_m3_year.toLocaleString()} m³
-                          </span>
-                        </div>
+                      <div className="text-[10px] text-white/40 flex items-center gap-1 mt-0.5 truncate">
+                        <MapPin size={8} className="flex-shrink-0" /> {b.address ?? '—'}
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className={`status-${b.status.toLowerCase().replace(' ', '-')}`}>{b.status}</span>
-                      <ChevronRight size={13} className="text-white/20 group-hover:text-accent transition-colors" />
+                      <div className="flex items-center gap-3 mt-1.5">
+                        {b.area_m2 && <span className="text-[10px] text-white/40">{b.area_m2.toLocaleString()} m²</span>}
+                        {b.energy_label && <span className="text-[10px] text-white/40">Label {b.energy_label}</span>}
+                      </div>
                     </div>
                   </div>
-                )
-              })}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <ChevronRight size={13} className="text-white/20 group-hover:text-accent transition-colors" />
+                  </div>
+                </div>
+              ))}
             </div>
             <button
               onClick={() => { onClose(); navigate('/buildings') }}
@@ -869,19 +880,44 @@ export default function Sites() {
   const [showAddSite, setShowAddSite]   = useState(false)
   const [appliedCountry, setAppliedCountry] = useState<string | null>(null)
   const [selectedSite, setSelectedSite] = useState<{ site: DBSite; city: string; citySiteIds: string[] } | null>(null)
+  // Real per-site consumption totals (keyed by site_id)
+  const [siteTotalsMap, setSiteTotalsMap] = useState<Record<string, { elec: number; gas: number; water: number; cost: number }>>({})
 
-  const fetchSites = async () => {
+  const loadSites = async () => {
     setLoading(true)
-    const { data } = await supabase
-      .from('sites')
-      .select('id, name, status, created_at, city_id, cities(id, name, countries(id, name, code))')
-      .eq('tenant_id', tenantId)
-      .order('name')
-    setSites((data as unknown as DBSite[]) ?? [])
+    const [sitesRes, connsRes, recordsRes] = await Promise.all([
+      supabase.from('sites').select('id, name, status, created_at, city_id, cities(id, name, countries(id, name, code))').eq('tenant_id', tenantId).order('name'),
+      supabase.from('energy_connections').select('id, site_id, product, connection_type').eq('tenant_id', tenantId),
+      supabase.from('consumption_records').select('connection_id, consumption, unit, cost').eq('tenant_id', tenantId),
+    ])
+    const siteList = (sitesRes.data as unknown as DBSite[]) ?? []
+    setSites(siteList)
+
+    // Build productMap and compute totals per site
+    const conns = connsRes.data ?? []
+    const records = recordsRes.data ?? []
+    const connToSite: Record<string, string> = {}
+    const pm: Record<string, string> = {}
+    for (const c of conns) {
+      connToSite[c.id] = c.site_id
+      pm[c.id] = c.product ?? c.connection_type ?? 'Electricity'
+    }
+    const totalsMap: Record<string, { elec: number; gas: number; water: number; cost: number }> = {}
+    for (const r of records) {
+      const siteId = connToSite[r.connection_id]
+      if (!siteId) continue
+      if (!totalsMap[siteId]) totalsMap[siteId] = { elec: 0, gas: 0, water: 0, cost: 0 }
+      const product = pm[r.connection_id]
+      if (product === 'Water') totalsMap[siteId].water += Number(r.consumption)
+      else if (r.unit === 'kWh') totalsMap[siteId].elec += Number(r.consumption)
+      else totalsMap[siteId].gas += Number(r.consumption)
+      totalsMap[siteId].cost += Number(r.cost)
+    }
+    setSiteTotalsMap(totalsMap)
     setLoading(false)
   }
 
-  useEffect(() => { fetchSites() }, [])
+  useEffect(() => { loadSites() }, [])
 
   const filtered = sites.filter(s => {
     const q = search.toLowerCase()
@@ -935,7 +971,7 @@ export default function Sites() {
               </button>
             )}
           </div>
-          <button onClick={fetchSites} className="text-white/30 hover:text-white/60 transition-colors p-2" title="Refresh">
+          <button onClick={loadSites} className="text-white/30 hover:text-white/60 transition-colors p-2" title="Refresh">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
           <button
@@ -1077,11 +1113,7 @@ export default function Sites() {
                           const mix    = siteMixes[site.id] ?? DEFAULT_MIX
                           const factor = calcEmissionFactor(mix)
                           const factorColor = factor < 0.15 ? '#10b981' : factor < 0.35 ? '#f59e0b' : '#ef4444'
-                          const budget = 80000   // placeholder until budget table is built
-                          const spend  = 52000   // placeholder
-                          const util   = Math.round((spend / budget) * 100)
-                          const barColor = util > 85 ? '#ef4444' : util > 60 ? '#f59e0b' : '#10b981'
-                          const totals = prevYearTotals(site.id)
+                          const totals = siteTotalsMap[site.id] ?? { elec: 0, gas: 0, water: 0, cost: 0 }
 
                           return (
                           <div key={site.id} className="card-hover group cursor-pointer"
@@ -1100,7 +1132,7 @@ export default function Sites() {
                             </div>
 
                             {/* Prev-year energy totals */}
-                            <div className="grid grid-cols-2 gap-1.5 mb-3">
+                            <div className="grid grid-cols-3 gap-1.5 mb-3">
                               <div className="bg-blue-500/8 border border-blue-500/15 rounded-lg px-2 py-1.5">
                                 <div className="flex items-center gap-1 mb-0.5">
                                   <Zap size={9} className="text-blue-400" />
@@ -1119,17 +1151,21 @@ export default function Sites() {
                                   {totals.gas.toLocaleString()} m³
                                 </div>
                               </div>
+                              <div className="bg-cyan-500/8 border border-cyan-500/15 rounded-lg px-2 py-1.5">
+                                <div className="flex items-center gap-1 mb-0.5">
+                                  <Droplets size={9} className="text-cyan-400" />
+                                  <span className="text-[9px] text-white/40">Water (yr)</span>
+                                </div>
+                                <div className="text-xs font-semibold font-mono text-cyan-300">
+                                  {totals.water.toLocaleString()} m³
+                                </div>
+                              </div>
                             </div>
 
-                            {/* Budget bar */}
-                            <div className="mb-3">
-                              <div className="flex justify-between text-xs text-white/40 mb-1.5">
-                                <span>Budget utilization</span>
-                                <span className="text-white/60">{util}%</span>
-                              </div>
-                              <div className="h-1.5 bg-bg-primary rounded-full overflow-hidden">
-                                <div className="h-full rounded-full transition-all" style={{ width: `${util}%`, background: barColor }} />
-                              </div>
+                            {/* Budget bar — not yet connected */}
+                            <div className="mb-3 flex items-center gap-1.5">
+                              <span className="text-[10px] text-white/30">Budget utilization</span>
+                              <NoDataBadge label="No budget data" />
                             </div>
 
                             {/* Energy mix strip */}
@@ -1174,7 +1210,7 @@ export default function Sites() {
         <AddSiteModal
           tenantId={tenantId}
           onClose={() => setShowAddSite(false)}
-          onCreated={fetchSites}
+          onCreated={loadSites}
         />
       )}
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLegendToggle } from '@/lib/useLegendToggle'
 import { Topbar } from '@/components/layout/Topbar'
 import { useTenantId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
@@ -22,7 +23,9 @@ interface CountrySummary {
   sites: number
   connections: number
   spend: number
-  consumption: number
+  consumption: number  // electricity kWh
+  gasConsumption: number  // m³
+  waterConsumption: number  // m³
   currency: string
 }
 
@@ -55,6 +58,7 @@ export default function Portfolio() {
   const [sites, setSites] = useState<SiteRow[]>([])
   const [monthlySpend, setMonthlySpend] = useState<MonthlyRow[]>([])
   const [loading, setLoading] = useState(true)
+  const { onLegendClick, isHidden } = useLegendToggle()
 
   useEffect(() => {
     if (!tenantId) return
@@ -73,7 +77,7 @@ export default function Portfolio() {
     // Fetch connections
     const { data: connsRaw } = await supabase
       .from('energy_connections')
-      .select('id, site_id, connection_type, status')
+      .select('id, site_id, connection_type, product, status')
       .eq('tenant_id', tenantId)
 
     // Fetch consumption records
@@ -88,9 +92,10 @@ export default function Portfolio() {
       return
     }
 
-    // Build connection → site map
+    // Build connection → site map and product map
     const connToSite: Record<string, string> = {}
-    connsRaw.forEach(c => { connToSite[c.id] = c.site_id })
+    const connProduct: Record<string, string> = {}
+    connsRaw.forEach(c => { connToSite[c.id] = c.site_id; connProduct[c.id] = c.product ?? c.connection_type ?? 'Electricity' })
 
     // Build site → country map
     const siteToCountry: Record<string, { name: string; code: string; currency: string; cityName: string }> = {}
@@ -122,6 +127,8 @@ export default function Portfolio() {
           connections: 0,
           spend: 0,
           consumption: 0,
+          gasConsumption: 0,
+          waterConsumption: 0,
           currency: c.currency,
         }
       }
@@ -150,9 +157,10 @@ export default function Portfolio() {
 
       // Total aggregation
       countryMap[countryCode].spend += r.cost ?? 0
-      if (r.unit === 'kWh') {
-        countryMap[countryCode].consumption += r.consumption ?? 0
-      }
+      const product = connProduct[r.connection_id] ?? 'Electricity'
+      if (product === 'Water')       countryMap[countryCode].waterConsumption += r.consumption ?? 0
+      else if (r.unit === 'kWh')     countryMap[countryCode].consumption      += r.consumption ?? 0
+      else                           countryMap[countryCode].gasConsumption   += r.consumption ?? 0
     })
 
     // Build monthly rows in chronological order
@@ -192,6 +200,8 @@ export default function Portfolio() {
 
   const totalSpend = countries.reduce((a, c) => a + c.spend, 0)
   const totalConsumption = countries.reduce((a, c) => a + c.consumption, 0)
+  const totalGas   = countries.reduce((a, c) => a + c.gasConsumption, 0)
+  const totalWater = countries.reduce((a, c) => a + c.waterConsumption, 0)
   const totalSites = countries.reduce((a, c) => a + c.sites, 0)
   const totalConnections = countries.reduce((a, c) => a + c.connections, 0)
 
@@ -231,7 +241,7 @@ export default function Portfolio() {
               <div className="card">
                 <div className="label mb-1">Total Electricity (kWh)</div>
                 <div className="text-2xl font-semibold text-white">{(totalConsumption / 1000000).toFixed(1)}M</div>
-                <div className="text-xs text-danger-light mt-1 flex items-center gap-1"><TrendingUp size={10}/> All sites</div>
+                <div className="text-xs text-white/40 mt-1">Gas {(totalGas/1000).toFixed(0)}K m³ · Water {(totalWater/1000).toFixed(0)}K m³</div>
               </div>
               <div className="card">
                 <div className="label mb-1">Countries</div>
@@ -257,7 +267,7 @@ export default function Portfolio() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-border-subtle">
-                      {['Country', 'Sites', 'Connections', 'Total Spend', 'Electricity (kWh)', 'Status'].map(h => (
+                      {['Country', 'Sites', 'Connections', 'Total Spend', 'Electricity (kWh)', 'Gas (m³)', 'Water (m³)', 'Status'].map(h => (
                         <th key={h} className="tbl-th">{h}</th>
                       ))}
                     </tr>
@@ -274,6 +284,8 @@ export default function Portfolio() {
                         <td className="tbl-td text-white/70">{c.connections}</td>
                         <td className="tbl-td text-white font-mono">{c.currency} {(c.spend / 1000).toFixed(0)}K</td>
                         <td className="tbl-td text-blue-300 font-mono">{(c.consumption / 1000).toFixed(0)}K</td>
+                        <td className="tbl-td text-amber-300 font-mono">{(c.gasConsumption / 1000).toFixed(0)}K</td>
+                        <td className="tbl-td text-cyan-300 font-mono">{(c.waterConsumption / 1000).toFixed(0)}K</td>
                         <td className="tbl-td">
                           <span className="status-active flex items-center gap-1"><CheckCircle2 size={10}/> Active</span>
                         </td>
@@ -284,7 +296,9 @@ export default function Portfolio() {
                       <td className="tbl-td text-white font-semibold">{totalSites}</td>
                       <td className="tbl-td text-white font-semibold">{totalConnections}</td>
                       <td className="tbl-td text-white font-semibold font-mono">— (multi-currency)</td>
-                      <td className="tbl-td text-white font-semibold font-mono">{(totalConsumption / 1000).toFixed(0)}K kWh</td>
+                      <td className="tbl-td text-blue-300 font-semibold font-mono">{(totalConsumption / 1000).toFixed(0)}K kWh</td>
+                      <td className="tbl-td text-amber-300 font-semibold font-mono">{(totalGas / 1000).toFixed(0)}K m³</td>
+                      <td className="tbl-td text-cyan-300 font-semibold font-mono">{(totalWater / 1000).toFixed(0)}K m³</td>
                       <td className="tbl-td"></td>
                     </tr>
                   </tbody>
@@ -362,12 +376,14 @@ export default function Portfolio() {
                           const c = countries.find(x => x.name === name)
                           return [`${c?.currency ?? ''} ${(v / 1000).toFixed(0)}K`, `${c?.flag ?? ''} ${name}`]
                         }} />
-                      <Legend wrapperStyle={{ fontSize: 10 }}
-                        formatter={v => `${countries.find(c => c.name === v)?.flag ?? ''} ${v}`} />
+                      <Legend wrapperStyle={{ fontSize: 10, cursor: 'pointer' }}
+                        formatter={v => `${countries.find(c => c.name === v)?.flag ?? ''} ${v}`}
+                        onClick={onLegendClick} />
                       {countries.map((c, i) => (
                         <Bar key={c.code} dataKey={c.name} stackId="a"
                           fill={COUNTRY_COLORS[i % COUNTRY_COLORS.length]} opacity={0.85}
-                          radius={i === countries.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]} />
+                          radius={i === countries.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+                          hide={isHidden(c.name)} />
                       ))}
                     </BarChart>
                   </ResponsiveContainer>

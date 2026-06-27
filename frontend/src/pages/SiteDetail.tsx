@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLegendToggle } from '@/lib/useLegendToggle'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
 import {
@@ -76,6 +77,8 @@ export default function SiteDetail() {
   const { market, siteMixes, setSiteMix, applySiteMixToCity } = useAppStore()
   const cfg = getMarketConfig(market)
   const tenantId = useTenantId()
+
+  const { onLegendClick, isHidden } = useLegendToggle()
 
   // DB state
   const [site,        setSite]        = useState<any | null>(null)
@@ -322,9 +325,9 @@ export default function SiteDetail() {
                     <XAxis dataKey="month" tick={{ fill: '#5a6385', fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: '#5a6385', fontSize: 10 }} axisLine={false} tickLine={false} />
                     <Tooltip contentStyle={TT} />
-                    <Legend wrapperStyle={{ fontSize: 11, color: '#5a6385' }} />
-                    <Bar dataKey="electricity" name="Electricity (kWh)" fill="#3b82f6" opacity={0.8} radius={[3,3,0,0]} />
-                    <Bar dataKey="gas"         name="Gas (m³)"          fill="#f59e0b" opacity={0.8} radius={[3,3,0,0]} />
+                    <Legend wrapperStyle={{ fontSize: 11, color: '#5a6385', cursor: 'pointer' }} onClick={onLegendClick} />
+                    <Bar dataKey="electricity" name="Electricity (kWh)" fill="#3b82f6" opacity={0.8} radius={[3,3,0,0]} hide={isHidden('electricity')} />
+                    <Bar dataKey="gas"         name="Gas (m³)"          fill="#f59e0b" opacity={0.8} radius={[3,3,0,0]} hide={isHidden('gas')} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

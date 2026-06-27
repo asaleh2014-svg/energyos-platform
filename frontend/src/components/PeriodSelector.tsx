@@ -5,7 +5,7 @@ import clsx from 'clsx'
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-export type PeriodPreset = 'today' | 'this_month' | 'this_quarter' | 'this_year' | 'last_12m' | 'custom'
+export type PeriodPreset = 'today' | 'this_month' | 'this_quarter' | 'this_year' | 'last_12m' | 'all_years' | 'custom'
 
 export interface Period {
   preset:  PeriodPreset
@@ -58,6 +58,8 @@ export function buildPeriod(preset: PeriodPreset, customFrom?: Date, customTo?: 
       const f = new Date(now); f.setFullYear(f.getFullYear()-1); f.setDate(f.getDate()+1)
       return { preset, from: startOfDay(f), to: endOfDay(now), label: 'Last 12 months', granularity: 'month' }
     }
+    case 'all_years':
+      return { preset, from: new Date(2015, 0, 1), to: endOfDay(now), label: 'All years', granularity: 'year' }
     case 'custom':
       return {
         preset,
@@ -69,7 +71,7 @@ export function buildPeriod(preset: PeriodPreset, customFrom?: Date, customTo?: 
   }
 }
 
-export const DEFAULT_PERIOD = buildPeriod('this_year')
+export const DEFAULT_PERIOD = buildPeriod('last_12m')
 
 // ─── Preset button strip ───────────────────────────────────────────────────────
 
@@ -79,6 +81,7 @@ const PRESETS: { key: PeriodPreset; label: string }[] = [
   { key: 'this_quarter', label: 'Quarter'  },
   { key: 'this_year',    label: 'Year'     },
   { key: 'last_12m',     label: '12 M'     },
+  { key: 'all_years',    label: 'All years'},
   { key: 'custom',       label: 'Custom'   },
 ]
 
@@ -182,7 +185,10 @@ export function PeriodSelector({ value, onChange, compact = false }: Props) {
             {tab === 'year' && (
               <div className="grid grid-cols-3 gap-1.5">
                 {YEARS.map(y => (
-                  <button key={y} onClick={() => { onChange(buildPeriod('this_year')); setOpen(false) }}
+                  <button key={y} onClick={() => {
+                    onChange({ preset: 'this_year', from: new Date(y,0,1), to: new Date(y,11,31,23,59,59,999), label: String(y), granularity: 'year' })
+                    setOpen(false)
+                  }}
                     className={clsx(
                       'text-xs py-2 rounded-lg border font-mono transition-colors',
                       value.preset === 'this_year' && value.from.getFullYear() === y

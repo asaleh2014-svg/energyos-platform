@@ -1,4 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
+import { useLegendToggle } from '@/lib/useLegendToggle'
+import { useYearFilter } from '@/lib/useYearFilter'
+import { YearSelector as YearSelectorInline } from '@/components/YearSelector'
+import { NoDataBadge } from '@/components/NoDataBadge'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Topbar } from '@/components/layout/Topbar'
 import {
@@ -314,8 +318,8 @@ function LinkConnectionPicker({
       {results.map(c => {
         const done = linked.includes(c.id)
         const busy = linking === c.id
-        const Icon = c.connection_type?.toLowerCase().includes('gas') ? Flame : Zap
-        const color = c.connection_type?.toLowerCase().includes('gas') ? '#f59e0b' : '#10b981'
+        const Icon = c.connection_type?.toLowerCase().includes('water') ? Droplets : c.connection_type?.toLowerCase().includes('gas') ? Flame : Zap
+        const color = c.connection_type?.toLowerCase().includes('water') ? '#06b6d4' : c.connection_type?.toLowerCase().includes('gas') ? '#f59e0b' : '#10b981'
         return (
           <div key={c.id} className="flex items-center gap-3 p-3 rounded-xl bg-bg-secondary border border-border-subtle">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: color + '20' }}>
@@ -417,46 +421,75 @@ function BuildingConnectionsSection({ siteId }: { siteId: string }) {
 }
 
 // ─── Monthly chart from real consumption records ───────────────────────────────
-function buildMonthlyFromRecords(records: ConsumptionRecord[], period: Period) {
+function buildMonthlyFromRecords(
+  records: ConsumptionRecord[],
+  period: Period,
+  connections: DBConnection[] = [],
+) {
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
   const now = new Date()
 
+  // Build product map from connections
+  const productMap: Record<string, string> = {}
+  for (const c of connections) productMap[c.id] = c.product ?? c.connection_type ?? 'Electricity'
+
   if (period.granularity === 'day') {
-    const byDay: Record<string, { elec: number; gas: number }> = {}
+    const byDay: Record<string, { elec: number; gas: number; water: number }> = {}
     for (const r of records) {
       const d = r.period_start.slice(0, 10)
-      if (!byDay[d]) byDay[d] = { elec: 0, gas: 0 }
-      // We don't distinguish elec vs gas here (no unit on connection yet), use consumption
-      byDay[d].elec += r.consumption
+      if (!byDay[d]) byDay[d] = { elec: 0, gas: 0, water: 0 }
+      const product = productMap[r.connection_id ?? ''] ?? (r.unit === 'kWh' ? 'Electricity' : 'Gas')
+      if (product === 'Water')       byDay[d].water += r.consumption
+      else if (r.unit === 'kWh')     byDay[d].elec  += r.consumption
+      else                           byDay[d].gas   += r.consumption
     }
     const cur = new Date(period.from)
     const end = new Date(period.to)
-    const rows: { month: string; elec: number; gas: number }[] = []
+    const rows: { month: string; elec: number; gas: number; water: number }[] = []
     while (cur <= end) {
       const key = cur.toISOString().slice(0, 10)
-      const day = byDay[key] ?? { elec: 0, gas: 0 }
-      rows.push({ month: `${cur.getDate()} ${MONTHS[cur.getMonth()]}`, elec: day.elec, gas: day.gas })
+      const day = byDay[key] ?? { elec: 0, gas: 0, water: 0 }
+      rows.push({ month: `${cur.getDate()} ${MONTHS[cur.getMonth()]}`, ...day })
       cur.setDate(cur.getDate() + 1)
     }
     return rows
   }
 
+  // Year grouping (all_years preset)
+  if (period.granularity === 'year') {
+    const byYear: Record<string, { elec: number; gas: number; water: number }> = {}
+    for (const r of records) {
+      const key = r.period_start.slice(0, 4)
+      if (!byYear[key]) byYear[key] = { elec: 0, gas: 0, water: 0 }
+      const product = productMap[r.connection_id ?? ''] ?? (r.unit === 'kWh' ? 'Electricity' : 'Gas')
+      if (product === 'Water')   byYear[key].water += r.consumption
+      else if (r.unit === 'kWh') byYear[key].elec  += r.consumption
+      else                       byYear[key].gas   += r.consumption
+    }
+    return Object.entries(byYear)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([year, v]) => ({ month: year, ...v }))
+  }
+
   // Monthly grouping
-  const byMonth: Record<string, { elec: number; gas: number }> = {}
+  const byMonth: Record<string, { elec: number; gas: number; water: number }> = {}
   for (const r of records) {
     const d = new Date(r.period_start)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    if (!byMonth[key]) byMonth[key] = { elec: 0, gas: 0 }
-    byMonth[key].elec += r.consumption
+    if (!byMonth[key]) byMonth[key] = { elec: 0, gas: 0, water: 0 }
+    const product = productMap[r.connection_id ?? ''] ?? (r.unit === 'kWh' ? 'Electricity' : 'Gas')
+    if (product === 'Water')       byMonth[key].water += r.consumption
+    else if (r.unit === 'kWh')     byMonth[key].elec  += r.consumption
+    else                           byMonth[key].gas   += r.consumption
   }
 
-  const rows: { month: string; elec: number; gas: number }[] = []
+  const rows: { month: string; elec: number; gas: number; water: number }[] = []
   const cur = new Date(period.from.getFullYear(), period.from.getMonth(), 1)
   const end = new Date(period.to.getFullYear(), period.to.getMonth(), 1)
   while (cur <= end) {
     const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`
     const label = `${MONTHS[cur.getMonth()]}${cur.getFullYear() !== now.getFullYear() ? ` ${cur.getFullYear()}` : ''}`
-    rows.push({ month: label, elec: byMonth[key]?.elec ?? 0, gas: byMonth[key]?.gas ?? 0 })
+    rows.push({ month: label, ...( byMonth[key] ?? { elec: 0, gas: 0, water: 0 }) })
     cur.setMonth(cur.getMonth() + 1)
   }
   return rows
@@ -473,6 +506,7 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
 
   const area   = building.area_m2 ?? 1
   const TT = { background: '#0d2b35', border: '1px solid #1a5568', borderRadius: 8, fontSize: 11 }
+  const { onLegendClick, isHidden } = useLegendToggle()
   const [showAddConn, setShowAddConn] = useState(false)
 
   // Fetch connections: prefer those linked to this building, fall back to site
@@ -503,17 +537,21 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
   useEffect(() => {
     if (connections.length === 0) return
     const ids = connections.map(c => c.id)
-    supabase
+    let q = supabase
       .from('consumption_records')
       .select('*')
       .eq('tenant_id', tenantId)
       .in('connection_id', ids)
-      .gte('period_start', period.from.toISOString().slice(0, 10))
-      .lte('period_start', period.to.toISOString().slice(0, 10))
-      .then(({ data }) => setRecords(data ?? []))
+    if (period.preset !== 'all_years') {
+      q = q
+        .gte('period_start', period.from.toISOString().slice(0, 10))
+        .lte('period_start', period.to.toISOString().slice(0, 10))
+    }
+    q.then(({ data }) => setRecords(data ?? []))
   }, [connections, tenantId, period])
 
-  const monthly = useMemo(() => buildMonthlyFromRecords(records, period), [records, period])
+  const allMonthly = useMemo(() => buildMonthlyFromRecords(records, period, connections), [records, period, connections])
+  const { years: chartYears, selected: selectedYears, toggle: toggleYear, selectAll: selectAllYears, filtered: monthly } = useYearFilter(allMonthly)
   const totalElec = monthly.reduce((a, r) => a + r.elec, 0)
   const eff = area > 0 ? (totalElec / area).toFixed(1) : '—'
   const co2 = (totalElec * 0.233 / 1000).toFixed(1)
@@ -593,25 +631,28 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
           </div>
         </div>
 
-        <div className="card">
-          <div className="text-xs font-semibold text-white/50 uppercase tracking-widest mb-4">Indoor Environment</div>
+        <div className="card border-dashed border-amber-500/20 bg-amber-500/5">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-xs font-semibold text-white/50 uppercase tracking-widest">Indoor Environment</span>
+            <NoDataBadge label="Sensor feed not connected" />
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { icon: Thermometer, label: 'Avg Temp',    value: `${22 + (hash(building.id) % 4)}°C`,      color: '#f59e0b' },
-              { icon: Droplets,    label: 'Humidity',    value: `${45 + (hash(building.id, 3) % 20)}%`,    color: '#3b82f6' },
-              { icon: Wind,        label: 'Air Quality', value: `${30 + (hash(building.id, 7) % 50)} AQI`, color: '#10b981' },
-              { icon: Users,       label: 'Occupancy',   value: building.occupancy_pct ? `${building.occupancy_pct}%` : '—', color: '#8b5cf6' },
-            ].map(({ icon: Icon, label, value, color }) => (
-              <div key={label} className="bg-bg-secondary rounded-xl p-3">
+              { icon: Thermometer, label: 'Avg Temp',    color: '#f59e0b' },
+              { icon: Droplets,    label: 'Humidity',    color: '#3b82f6' },
+              { icon: Wind,        label: 'Air Quality', color: '#10b981' },
+              { icon: Users,       label: 'Occupancy',   color: '#8b5cf6', value: building.occupancy_pct ? `${building.occupancy_pct}%` : undefined },
+            ].map(({ icon: Icon, label, color, value }) => (
+              <div key={label} className="bg-bg-secondary/50 rounded-xl p-3 border border-dashed border-amber-500/15">
                 <div className="flex items-center gap-1.5 mb-1"><Icon size={11} style={{ color }} /><span className="label">{label}</span></div>
-                <div className="text-base font-semibold text-white">{value}</div>
+                <div className="text-base font-semibold text-white/30">{value ?? '—'}</div>
               </div>
             ))}
           </div>
         </div>
 
         <div className="card">
-          <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
             <span className="text-xs font-semibold text-white/50 uppercase tracking-widest">Consumption</span>
             <PeriodSelector value={period} onChange={setPeriod} />
             <button onClick={() => setShowTable(v => !v)}
@@ -619,6 +660,11 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
               <Table size={10} /> {showTable ? 'Hide' : 'Table'}
             </button>
           </div>
+          {chartYears.length > 1 && (
+            <div className="mb-3 pb-3 border-b border-border-subtle">
+              <YearSelectorInline years={chartYears} selected={selectedYears} onToggle={toggleYear} onAll={selectAllYears} />
+            </div>
+          )}
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={monthly} barGap={2} barCategoryGap="30%">
               <CartesianGrid strokeDasharray="3 3" stroke="#ffffff08" vertical={false} />
@@ -626,9 +672,10 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
               <YAxis tick={{ fontSize: 10, fill: '#6b8fa3' }} axisLine={false} tickLine={false}
                 tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
               <Tooltip contentStyle={TT} />
-              <Legend iconSize={9} wrapperStyle={{ fontSize: 11 }} />
-              <Bar dataKey="elec" name="Elec (kWh)" fill="#3b82f6" opacity={0.85} radius={[3,3,0,0]} />
-              <Bar dataKey="gas"  name="Gas (m³)"   fill="#f59e0b" opacity={0.75} radius={[3,3,0,0]} />
+              <Legend iconSize={9} wrapperStyle={{ fontSize: 11, cursor: 'pointer' }} onClick={onLegendClick} />
+              <Bar dataKey="elec"  name="Elec (kWh)"  fill="#3b82f6" opacity={0.85} radius={[3,3,0,0]} hide={isHidden('elec')} />
+              <Bar dataKey="gas"   name="Gas (m³)"    fill="#f59e0b" opacity={0.75} radius={[3,3,0,0]} hide={isHidden('gas')} />
+              <Bar dataKey="water" name="Water (m³)"  fill="#06b6d4" opacity={0.75} radius={[3,3,0,0]} hide={isHidden('water')} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -668,8 +715,17 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
                   <th className="tbl-th">Period</th>
                   <th className="tbl-th text-right">Elec (kWh)</th>
                   <th className="tbl-th text-right">Gas (m³)</th>
+                  <th className="tbl-th text-right">Water (m³)</th>
                   <th className="tbl-th text-right">kWh/m²</th>
-                  <th className="tbl-th text-right">CO₂ (kg)</th>
+                  <th className="tbl-th text-right text-amber-400/60">CO₂ est. (kg) ⚠</th>
+                </tr>
+                <tr className="bg-bg-primary/70 border-b-2 border-border-default text-[10px]">
+                  <td className="tbl-td font-bold text-white/40">Total</td>
+                  <td className="tbl-td text-right font-bold font-mono text-blue-300">{totalElec.toLocaleString()}</td>
+                  <td className="tbl-td text-right font-bold font-mono text-amber-300">{monthly.reduce((a,r)=>a+r.gas,0).toLocaleString()}</td>
+                  <td className="tbl-td text-right font-bold font-mono text-cyan-300">{monthly.reduce((a,r)=>a+r.water,0).toLocaleString()}</td>
+                  <td className="tbl-td text-right font-bold font-mono text-green-300">{eff}</td>
+                  <td className="tbl-td text-right font-bold font-mono text-white/50">{Math.round(totalElec*0.233).toLocaleString()}</td>
                 </tr>
               </thead>
               <tbody>
@@ -678,6 +734,7 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
                     <td className="tbl-td text-white/70">{r.month}</td>
                     <td className="tbl-td text-right font-mono text-blue-300">{r.elec.toLocaleString()}</td>
                     <td className="tbl-td text-right font-mono text-amber-300">{r.gas.toLocaleString()}</td>
+                    <td className="tbl-td text-right font-mono text-cyan-300">{r.water.toLocaleString()}</td>
                     <td className="tbl-td text-right font-mono text-green-300">{area > 0 ? (r.elec / area).toFixed(1) : '—'}</td>
                     <td className="tbl-td text-right font-mono text-white/50">{Math.round(r.elec * 0.233).toLocaleString()}</td>
                   </tr>
@@ -688,6 +745,7 @@ function BuildingDetail({ building }: { building: DBBuilding }) {
                   <td className="tbl-td font-bold text-white/50">Total</td>
                   <td className="tbl-td text-right font-bold font-mono text-blue-300">{totalElec.toLocaleString()}</td>
                   <td className="tbl-td text-right font-bold font-mono text-amber-300">{monthly.reduce((a,r)=>a+r.gas,0).toLocaleString()}</td>
+                  <td className="tbl-td text-right font-bold font-mono text-cyan-300">{monthly.reduce((a,r)=>a+r.water,0).toLocaleString()}</td>
                   <td className="tbl-td text-right font-bold font-mono text-green-300">{eff}</td>
                   <td className="tbl-td text-right font-bold font-mono text-white/50">{Math.round(totalElec*0.233).toLocaleString()}</td>
                 </tr>

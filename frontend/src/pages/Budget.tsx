@@ -272,7 +272,15 @@ export default function Budget() {
           className="mb-4"
           table={
             <table className="w-full">
-              <thead><tr>{['Month','Budget','Actual','Deviation'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
+              <thead>
+                <tr>{['Month','Budget','Actual','Deviation'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr>
+                <tr className="bg-bg-primary/70 border-b-2 border-border-default text-[10px]">
+                  <td className="tbl-td font-bold text-white/40">Total</td>
+                  <td className="tbl-td font-bold text-white">{cfg.currencySymbol} {kpi.totalBudget.toLocaleString()}</td>
+                  <td className={clsx('tbl-td font-bold', overBudget ? 'text-danger-light' : 'text-success-light')}>{cfg.currencySymbol} {kpi.totalActual.toLocaleString()}</td>
+                  <td className={clsx('tbl-td font-bold', overBudget ? 'text-danger-light' : 'text-success-light')}>{overBudget?'+':''}{cfg.currencySymbol} {kpi.totalDev.toLocaleString()}</td>
+                </tr>
+              </thead>
               <tbody>
                 {chartRows.map(row => (
                   <tr key={row.month} className="tbl-row">
@@ -386,7 +394,10 @@ export default function Budget() {
                       <td className="tbl-td font-mono text-white/60 text-[10px]">{m.ean_code}</td>
                       <td className="tbl-td text-white/70 max-w-[130px] truncate">{m.site_name}</td>
                       <td className="tbl-td">
-                        <span className={clsx('text-[10px] px-1.5 py-0.5 rounded-full', m.conn_type === 'Electricity' ? 'bg-blue-500/15 text-blue-300' : 'bg-amber-500/15 text-amber-300')}>
+                        <span className={clsx('text-[10px] px-1.5 py-0.5 rounded-full',
+                          m.conn_type === 'Electricity' ? 'bg-blue-500/15 text-blue-300' :
+                          m.conn_type === 'Water'       ? 'bg-cyan-500/15 text-cyan-300' :
+                                                          'bg-amber-500/15 text-amber-300')}>
                           {m.conn_type}
                         </span>
                       </td>

@@ -18,6 +18,7 @@ import Settings from '@/pages/Settings'
 import Emissions from '@/pages/Emissions'
 import Budget from '@/pages/Budget'
 import Alerts from '@/pages/Alerts'
+import Admin from '@/pages/Admin'
 
 const router = createBrowserRouter([
   { path: '/login',  element: <Login /> },
@@ -44,6 +45,7 @@ const router = createBrowserRouter([
           { path: 'reports',    element: <Reports /> },
           { path: 'invoices',   element: <Invoices /> },
           { path: 'settings',   element: <Settings /> },
+          { path: 'admin',      element: <Admin /> },
         ],
       },
     ],

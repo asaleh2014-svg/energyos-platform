@@ -1,5 +1,5 @@
 export type Market = 'UAE-DXB' | 'UAE-AUH' | 'UAE-SHJ' | 'UAE-RAK' | 'UAE-AJM' | 'UAE-FUJ' | 'UAE-UAQ' | 'NL' | 'UK' | 'SA' | 'INTL'
-export type ConnectionType = 'Electricity' | 'Gas'
+export type ConnectionType = 'Electricity' | 'Gas' | 'Water'
 export type ConnectionStatus = 'Active' | 'Inactive' | 'Pending'
 export type MeterType = 'Smart' | 'Traditional'
 export type UserRole = 'Administrator' | 'Auditor' | 'Viewer'

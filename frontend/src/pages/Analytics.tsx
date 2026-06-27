@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { useLegendToggle } from '@/lib/useLegendToggle'
+import { useYearFilter } from '@/lib/useYearFilter'
+import { downloadCSV } from '@/lib/downloadUtils'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import {
-  Zap, Flame, Upload, Download, CheckCircle, AlertTriangle, X, Loader2,
+  Zap, Flame, Droplets, Upload, Download, CheckCircle, AlertTriangle, X, Loader2,
   TrendingUp, TrendingDown, Minus, BarChart3, Activity,
 } from 'lucide-react'
 import { ChartCard } from '@/components/ChartCard'
@@ -20,28 +23,40 @@ import { useTenantId } from '@/lib/auth'
 // ─── Types ────────────────────────────────────────────────────────────────────
 type PageTab = 'charts' | 'import'
 
-interface DataPoint { label: string; electricity: number; gas: number; cost: number }
+interface DataPoint { label: string; electricity: number; gas: number; water: number; cost: number }
 
 const TT = { background: '#0d1a2e', border: '1px solid #1e3a5f', borderRadius: 8, fontSize: 11 }
 
 // ─── Real consumption hook ────────────────────────────────────────────────────
 function useRealConsumption(tenantId: string) {
-  const [rows,    setRows]    = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [version, setVersion] = useState(0)
+  const [rows,        setRows]        = useState<any[]>([])
+  const [productMap,  setProductMap]  = useState<Record<string, string>>({})
+  const [loading,     setLoading]     = useState(true)
+  const [version,     setVersion]     = useState(0)
   const refresh = useCallback(() => setVersion(v => v + 1), [])
 
   useEffect(() => {
     setLoading(true)
-    supabase
-      .from('consumption_records')
-      .select('period_start, consumption, unit, cost')
-      .eq('tenant_id', tenantId)
-      .order('period_start')
-      .then(({ data }) => { setRows(data ?? []); setLoading(false) })
+    Promise.all([
+      supabase
+        .from('consumption_records')
+        .select('connection_id, period_start, consumption, unit, cost')
+        .eq('tenant_id', tenantId)
+        .order('period_start'),
+      supabase
+        .from('energy_connections')
+        .select('id, product')
+        .eq('tenant_id', tenantId),
+    ]).then(([recs, conns]) => {
+      const map: Record<string, string> = {}
+      for (const c of (conns.data ?? [])) map[c.id] = c.product ?? 'Electricity'
+      setProductMap(map)
+      setRows(recs.data ?? [])
+      setLoading(false)
+    })
   }, [tenantId, version])
 
-  return { rows, loading, refresh }
+  return { rows, productMap, loading, refresh }
 }
 
 type Granularity = 'monthly' | 'quarterly' | 'yearly'
@@ -54,23 +69,25 @@ function granForPeriod(p: Period): Granularity {
   return 'monthly'
 }
 
-function filterAndBucket(rows: any[], period: Period): DataPoint[] {
+function filterAndBucket(rows: any[], period: Period, productMap: Record<string, string> = {}): DataPoint[] {
   const from = period.from.toISOString().slice(0, 10)
   const to   = period.to.toISOString().slice(0, 10)
   const gran = granForPeriod(period)
 
   const filtered = rows.filter(r => r.period_start >= from && r.period_start <= to)
 
-  const map: Record<string, { electricity: number; gas: number; cost: number }> = {}
+  const map: Record<string, { electricity: number; gas: number; water: number; cost: number }> = {}
   for (const r of filtered) {
     const d = r.period_start as string
     let key: string
     if (gran === 'yearly')    key = d.slice(0, 4)
     else if (gran === 'quarterly') { const m = parseInt(d.slice(5, 7)); key = `${d.slice(0, 4)}-Q${Math.ceil(m / 3)}` }
     else key = d.slice(0, 7)
-    if (!map[key]) map[key] = { electricity: 0, gas: 0, cost: 0 }
-    if (r.unit === 'kWh') map[key].electricity += Number(r.consumption)
-    else                  map[key].gas          += Number(r.consumption)
+    if (!map[key]) map[key] = { electricity: 0, gas: 0, water: 0, cost: 0 }
+    const product = productMap[r.connection_id] ?? (r.unit === 'kWh' ? 'Electricity' : 'Gas')
+    if (product === 'Water')           map[key].water       += Number(r.consumption)
+    else if (r.unit === 'kWh')         map[key].electricity += Number(r.consumption)
+    else                               map[key].gas         += Number(r.consumption)
     map[key].cost += Number(r.cost ?? 0)
   }
 
@@ -81,8 +98,9 @@ function filterAndBucket(rows: any[], period: Period): DataPoint[] {
         ? (() => { const d = new Date(key + '-01'); return `${d.toLocaleString('default', { month: 'short' })} '${String(d.getFullYear()).slice(2)}` })()
         : key,
       electricity: Math.round(v.electricity),
-      gas:  Math.round(v.gas),
-      cost: Math.round(v.cost),
+      gas:   Math.round(v.gas),
+      water: Math.round(v.water),
+      cost:  Math.round(v.cost),
     }))
 }
 
@@ -117,23 +135,26 @@ function KpiCard({
 
 // ─── Portfolio view ────────────────────────────────────────────────────────────
 function PortfolioView({
-  period, rows, loading,
+  period, rows, productMap, loading,
 }: {
-  period: Period; rows: any[]; loading: boolean
+  period: Period; rows: any[]; productMap: Record<string, string>; loading: boolean
 }) {
   const [energyUnit, setEnergyUnit] = useState<'kWh' | 'MWh'>('kWh')
-  const [showElec, setShowElec] = useState(true)
-  const [showGas,  setShowGas]  = useState(true)
+  const [showElec,  setShowElec]  = useState(true)
+  const [showGas,   setShowGas]   = useState(true)
+  const [showWater, setShowWater] = useState(true)
 
-  const data = filterAndBucket(rows, period)
+  const rawData = filterAndBucket(rows, period, productMap)
+  const { years, selected: selectedYears, toggle: toggleYear, selectAll: selectAllYears, filtered: data } = useYearFilter(rawData, r => r.label)
 
   // For KPIs use all rows (full portfolio history)
   const allFrom = new Date('2000-01-01'); const allTo = new Date('2099-12-31')
   const monthly = filterAndBucket(rows, { ...period, preset: 'last_12m', from: allFrom, to: allTo, granularity: 'month', label: '' })
 
-  const sumElec = data.reduce((a, p) => a + p.electricity, 0)
-  const sumGas  = data.reduce((a, p) => a + p.gas, 0)
-  const sumCost = data.reduce((a, p) => a + p.cost, 0)
+  const sumElec  = data.reduce((a, p) => a + p.electricity, 0)
+  const sumGas   = data.reduce((a, p) => a + p.gas, 0)
+  const sumWater = data.reduce((a, p) => a + p.water, 0)
+  const sumCost  = data.reduce((a, p) => a + p.cost, 0)
 
   // YoY: compare first half vs second half of filtered period
   const yoyPct = (() => {
@@ -164,8 +185,9 @@ function PortfolioView({
   const chartData = data.map(p => ({
     label: p.label,
     electricity: showElec ? (unit === 'MWh' ? Math.round(p.electricity / 10) / 100 : p.electricity) : undefined,
-    gas: showGas ? p.gas : undefined,
-    cost: p.cost,
+    gas:   showGas   ? p.gas   : undefined,
+    water: showWater ? p.water : undefined,
+    cost:  p.cost,
   }))
 
   return (
@@ -200,6 +222,12 @@ function PortfolioView({
           value={`${Math.round(sumGas).toLocaleString()} m³`}
           sub={`≈ ${Math.round(gasKwh).toLocaleString()} kWh equiv.`}
           color="amber"
+        />
+        <KpiCard
+          label="Total Water"
+          value={`${Math.round(sumWater).toLocaleString()} m³`}
+          sub={sumWater > 0 ? `AED ${(sumWater * 4.75).toFixed(0)} est. cost` : 'no water connections'}
+          color="blue"
         />
         <KpiCard
           label="Total Cost"
@@ -250,14 +278,16 @@ function PortfolioView({
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <UnitSelect value={energyUnit} onChange={setEnergyUnit} />
         {[
-          { active: showElec, set: setShowElec, color: 'blue',  icon: <Zap size={11}/>,   label: 'Electricity' },
-          { active: showGas,  set: setShowGas,  color: 'amber', icon: <Flame size={11}/>, label: 'Gas' },
+          { active: showElec,  set: setShowElec,  color: 'blue',  icon: <Zap size={11}/>,      label: 'Electricity' },
+          { active: showGas,   set: setShowGas,   color: 'amber', icon: <Flame size={11}/>,    label: 'Gas' },
+          { active: showWater, set: setShowWater, color: 'cyan',  icon: <Droplets size={11}/>, label: 'Water' },
         ].map(({ active, set, color, icon, label }) => (
           <button key={label} onClick={() => set(!active)}
             className={clsx(
               'flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all',
               active && color === 'blue'  && 'bg-blue-500/15 border-blue-500/40 text-blue-300',
               active && color === 'amber' && 'bg-amber-500/15 border-amber-500/40 text-amber-300',
+              active && color === 'cyan'  && 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300',
               !active && 'border-border-subtle text-white/30',
             )}>
             {icon} {label}
@@ -269,20 +299,38 @@ function PortfolioView({
       <ChartCard
         title={`${gran.charAt(0).toUpperCase() + gran.slice(1)} Consumption`}
         subtitle={`${chartData.length} periods · ${period.label}`}
+        yearFilter={{ years, selected: selectedYears, onToggle: toggleYear, onAll: selectAllYears }}
+        csvData={() => {
+          const headers = ['Period', ...(showElec ? [`Electricity (${unit})`] : []), ...(showGas ? ['Gas (m³)'] : []), ...(showWater ? ['Water (m³)'] : []), 'Cost (AED)']
+          const rows = chartData.map(r => [r.label, ...(showElec ? [r.electricity ?? 0] : []), ...(showGas ? [r.gas ?? 0] : []), ...(showWater ? [r.water ?? 0] : []), r.cost])
+          return [headers, ...rows]
+        }}
+        csvFilename="consumption-analytics.csv"
         table={
           <table className="w-full">
-            <thead><tr>
-              <th className="tbl-th">Period</th>
-              {showElec && <th className="tbl-th">Electricity ({unit})</th>}
-              {showGas  && <th className="tbl-th">Gas (m³)</th>}
-              <th className="tbl-th">Cost</th>
-            </tr></thead>
+            <thead>
+              <tr>
+                <th className="tbl-th">Period</th>
+                {showElec  && <th className="tbl-th">Electricity ({unit})</th>}
+                {showGas   && <th className="tbl-th">Gas (m³)</th>}
+                {showWater && <th className="tbl-th">Water (m³)</th>}
+                <th className="tbl-th">Cost</th>
+              </tr>
+              <tr className="bg-bg-primary/70 border-b-2 border-border-default text-[10px]">
+                <td className="tbl-td font-bold text-white/40">Total</td>
+                {showElec  && <td className="tbl-td text-blue-300 font-bold font-mono">{chartData.reduce((a,r)=>a+(r.electricity??0),0).toLocaleString()}</td>}
+                {showGas   && <td className="tbl-td text-amber-300 font-bold font-mono">{chartData.reduce((a,r)=>a+(r.gas??0),0).toLocaleString()}</td>}
+                {showWater && <td className="tbl-td text-cyan-300 font-bold font-mono">{chartData.reduce((a,r)=>a+(r.water??0),0).toLocaleString()}</td>}
+                <td className="tbl-td text-white/60 font-bold font-mono">{chartData.reduce((a,r)=>a+r.cost,0).toLocaleString()}</td>
+              </tr>
+            </thead>
             <tbody>
               {chartData.map(row => (
                 <tr key={row.label} className="tbl-row">
                   <td className="tbl-td text-white/70">{row.label}</td>
-                  {showElec && <td className="tbl-td text-blue-300">{(row.electricity ?? 0).toLocaleString()}</td>}
-                  {showGas  && <td className="tbl-td text-amber-300">{(row.gas ?? 0).toLocaleString()}</td>}
+                  {showElec  && <td className="tbl-td text-blue-300">{(row.electricity ?? 0).toLocaleString()}</td>}
+                  {showGas   && <td className="tbl-td text-amber-300">{(row.gas ?? 0).toLocaleString()}</td>}
+                  {showWater && <td className="tbl-td text-cyan-300">{(row.water ?? 0).toLocaleString()}</td>}
                   <td className="tbl-td text-white/60">{row.cost.toLocaleString()}</td>
                 </tr>
               ))}
@@ -302,9 +350,16 @@ function PortfolioView({
               labelStyle={{ color: '#e8eaf2', fontWeight: 600, marginBottom: 4 }}
               formatter={(value: number, name: string) => [
                 `${value.toLocaleString()} ${name === 'electricity' ? unit : 'm³'}`,
-                name === 'electricity' ? 'Electricity' : 'Gas',
+                name === 'electricity' ? 'Electricity' : name === 'gas' ? 'Gas' : 'Water',
               ]} />
-            <Legend wrapperStyle={{ fontSize: 11 }} formatter={v => v === 'electricity' ? 'Electricity' : 'Gas'} />
+            <Legend wrapperStyle={{ fontSize: 11, cursor: 'pointer' }}
+              formatter={v => v === 'electricity' ? 'Electricity' : v === 'gas' ? 'Gas' : 'Water'}
+              onClick={(e: any) => {
+                const k = e?.dataKey ?? e?.value ?? ''
+                if (k === 'electricity') setShowElec(v => !v)
+                else if (k === 'gas')   setShowGas(v => !v)
+                else if (k === 'water') setShowWater(v => !v)
+              }} />
             {showElec && (
               <Bar yAxisId="elec" dataKey="electricity" name="electricity" fill="#3b82f6"
                 opacity={0.85} radius={[3, 3, 0, 0]} maxBarSize={barSize} />
@@ -313,6 +368,12 @@ function PortfolioView({
               <Line yAxisId="gas" type="monotone" dataKey="gas" name="gas"
                 stroke="#f59e0b" strokeWidth={2}
                 dot={chartData.length <= 20 ? { r: 3, fill: '#f59e0b' } : false}
+                activeDot={{ r: 4 }} />
+            )}
+            {showWater && (
+              <Line yAxisId="gas" type="monotone" dataKey="water" name="water"
+                stroke="#06b6d4" strokeWidth={2} strokeDasharray="5 3"
+                dot={chartData.length <= 20 ? { r: 3, fill: '#06b6d4' } : false}
                 activeDot={{ r: 4 }} />
             )}
           </ComposedChart>
@@ -550,7 +611,7 @@ export default function Analytics() {
     granularity: 'month',
   })
 
-  const { rows, loading, refresh } = useRealConsumption(tenantId)
+  const { rows, productMap, loading, refresh } = useRealConsumption(tenantId)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -581,7 +642,7 @@ export default function Analytics() {
         {tab === 'import' ? (
           <ImportView tenantId={tenantId} onImported={() => { refresh(); setTab('charts') }} />
         ) : (
-          <PortfolioView period={period} rows={rows} loading={loading} />
+          <PortfolioView period={period} rows={rows} productMap={productMap} loading={loading} />
         )}
 
       </div>

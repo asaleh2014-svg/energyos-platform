@@ -53,12 +53,18 @@ export default function Emissions() {
         siteInfo[s.name] = { city, country }   // also index by name for fallback
       }
 
-      // Aggregate consumption per connection
+      // Build product map to exclude water from CO₂ calculations
+      const productMap: Record<string, string> = {}
+      for (const c of conns) productMap[c.id] = c.product ?? c.connection_type ?? 'Electricity'
+
+      // Aggregate consumption per connection (water excluded — no combustion CO₂)
       const connElec: Record<string, number> = {}
       const connGas: Record<string, number> = {}
       for (const r of records) {
         const cid = r.connection_id
         if (!cid) continue
+        const product = productMap[cid] ?? 'Electricity'
+        if (product === 'Water') continue  // water has zero direct CO₂
         if (r.unit === 'kWh') connElec[cid] = (connElec[cid] ?? 0) + Number(r.consumption)
         else connGas[cid] = (connGas[cid] ?? 0) + Number(r.consumption)
       }

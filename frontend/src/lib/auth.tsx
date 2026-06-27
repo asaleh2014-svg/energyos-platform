@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { type Session, type User } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import { isDemoMode, DEMO_TENANT as DEMO_TENANT_ID } from './demo'
+import { useAppStore } from './store'
 
 interface TenantProfile {
   id: string
@@ -71,8 +72,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export const useAuth = () => useContext(AuthContext)
 
-/** Returns the tenant ID of the logged-in user, or the demo tenant in demo/fallback mode. */
+/** Returns the tenant ID to query — admin impersonation overrides the logged-in user's tenant. */
 export const useTenantId = () => {
   const { profile } = useContext(AuthContext)
-  return profile?.id ?? DEMO_TENANT_ID
+  const adminTenantId = useAppStore(s => s.adminTenantId)
+  return adminTenantId ?? profile?.id ?? DEMO_TENANT_ID
+}
+
+// Hardcoded admin user ID — from tenant_users table
+const ADMIN_USER_ID = 'd2fd2b4a-92c9-4db8-a842-1f9b70294623'
+
+export const useIsAdmin = () => {
+  const { user } = useContext(AuthContext)
+  return user?.id === ADMIN_USER_ID
 }

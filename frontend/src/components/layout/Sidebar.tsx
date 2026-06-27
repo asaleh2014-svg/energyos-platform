@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { useAppStore } from '@/lib/store'
-import { useAuth, useTenantId } from '@/lib/auth'
+import { useAuth, useTenantId, useIsAdmin } from '@/lib/auth'
 import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import {
   LayoutDashboard, BarChart3, Zap, Building2, Gauge, Bot,

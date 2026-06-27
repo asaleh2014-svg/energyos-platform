@@ -14,6 +14,12 @@ interface AppState {
   sidebarOpen:   boolean
   energyUnit:    'kWh' | 'MWh'
 
+  // Admin impersonation — when set, overrides the logged-in user's tenant
+  adminTenantId:   string | null
+  adminTenantName: string | null
+  setAdminTenant:  (id: string, name: string) => void
+  clearAdminTenant: () => void
+
   // Site-level energy mix (keyed by site_id)
   siteMixes:     Record<string, ElecSource>
 
@@ -61,6 +67,11 @@ export const useAppStore = create<AppState>()(
         created_at:        '2024-01-01',
       },
       sidebarOpen: true,
+
+      adminTenantId:   null,
+      adminTenantName: null,
+      setAdminTenant:  (id, name) => set({ adminTenantId: id, adminTenantName: name }),
+      clearAdminTenant: ()        => set({ adminTenantId: null, adminTenantName: null }),
 
       setMarket:     (market)     => set({ market }),
       setEnergyUnit: (energyUnit) => set({ energyUnit }),

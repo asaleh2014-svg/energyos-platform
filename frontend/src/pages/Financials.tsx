@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useLegendToggle } from '@/lib/useLegendToggle'
 import { Topbar } from '@/components/layout/Topbar'
 import { useAppStore } from '@/lib/store'
 import { MARKET_CONFIGS , getMarketConfig } from '@/types'
 import { useTenantId } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
-import { fetchConnections, fetchConsumption, groupByMonth } from '@/lib/dbQueries'
+import { fetchConnections, fetchConsumption, groupByMonth, buildProductMap } from '@/lib/dbQueries'
+import { downloadCSV } from '@/lib/downloadUtils'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, ReferenceLine, Cell,
@@ -206,6 +208,8 @@ function CostSummaryTab({ tenantId, currencySymbol }: { tenantId: string; curren
   const [totalCost,  setTotalCost]    = useState(0)
   const [totalElec,  setTotalElec]    = useState(0)
   const [totalGas,   setTotalGas]     = useState(0)
+  const [totalWater, setTotalWater]   = useState(0)
+  const { onLegendClick, isHidden } = useLegendToggle()
 
   useEffect(() => {
     async function load() {
@@ -215,14 +219,20 @@ function CostSummaryTab({ tenantId, currencySymbol }: { tenantId: string; curren
         fetchConnections(tenantId),
       ])
 
+      const pm = buildProductMap(conns)
+
       // Monthly totals
-      const monthly = groupByMonth(records)
-      const mData = monthly.map(m => ({
-        month: new Date(m.month + '-01').toLocaleString('default', { month:'short', year:'2-digit' }),
-        electricity: Math.round(m.cost * (m.elec / (m.elec + m.gas || 1))),
-        gas:         Math.round(m.cost * (m.gas  / (m.elec + m.gas || 1))),
-        total:       Math.round(m.cost),
-      }))
+      const monthly = groupByMonth(records, pm)
+      const mData = monthly.map(m => {
+        const total = m.elec + m.gas + m.water || 1
+        return {
+          month: new Date(m.month + '-01').toLocaleString('default', { month:'short', year:'2-digit' }),
+          electricity: Math.round(m.cost * (m.elec  / total)),
+          gas:         Math.round(m.cost * (m.gas   / total)),
+          water:       Math.round(m.cost * (m.water / total)),
+          total:       Math.round(m.cost),
+        }
+      })
       setMonthlyData(mData)
 
       // Site costs
@@ -239,12 +249,19 @@ function CostSummaryTab({ tenantId, currencySymbol }: { tenantId: string; curren
         .sort((a, b) => b.cost - a.cost)
       setSiteCosts(sArr)
 
-      const tCost = records.reduce((a, r) => a + Number(r.cost ?? 0), 0)
-      const tElec = records.filter(r => r.unit === 'kWh').reduce((a, r) => a + Number(r.cost ?? 0), 0)
-      const tGas  = records.filter(r => r.unit !== 'kWh').reduce((a, r) => a + Number(r.cost ?? 0), 0)
+      let tCost = 0, tElec = 0, tGas = 0, tWater = 0
+      for (const r of records) {
+        const cost = Number(r.cost ?? 0)
+        tCost += cost
+        const product = pm[r.connection_id] ?? (r.unit === 'kWh' ? 'Electricity' : 'Gas')
+        if (product === 'Water')       tWater += cost
+        else if (r.unit === 'kWh')     tElec  += cost
+        else                           tGas   += cost
+      }
       setTotalCost(tCost)
       setTotalElec(tElec)
       setTotalGas(tGas)
+      setTotalWater(tWater)
       setLoading(false)
     }
     load()
@@ -254,36 +271,56 @@ function CostSummaryTab({ tenantId, currencySymbol }: { tenantId: string; curren
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         <div className="card">
           <div className="label mb-1">Total Cost</div>
           <div className="text-xl font-semibold text-white">{currencySymbol} {Math.round(totalCost).toLocaleString()}</div>
-          <div className="text-xs text-white/40 mt-1">All records in DB</div>
+          <div className="text-xs text-white/40 mt-1">All commodities</div>
         </div>
-        <div className="card">
+        <div className="card border-l-2 border-l-blue-500/40">
           <div className="label mb-1">Electricity Cost</div>
           <div className="text-xl font-semibold text-blue-300">{currencySymbol} {Math.round(totalElec).toLocaleString()}</div>
           <div className="text-xs text-white/40 mt-1">{totalCost > 0 ? ((totalElec/totalCost)*100).toFixed(1) : 0}% of total</div>
         </div>
-        <div className="card">
+        <div className="card border-l-2 border-l-amber-500/40">
           <div className="label mb-1">Gas Cost</div>
           <div className="text-xl font-semibold text-amber-300">{currencySymbol} {Math.round(totalGas).toLocaleString()}</div>
           <div className="text-xs text-white/40 mt-1">{totalCost > 0 ? ((totalGas/totalCost)*100).toFixed(1) : 0}% of total</div>
+        </div>
+        <div className="card border-l-2 border-l-cyan-500/40">
+          <div className="label mb-1">Water Cost</div>
+          <div className="text-xl font-semibold text-cyan-300">{currencySymbol} {Math.round(totalWater).toLocaleString()}</div>
+          <div className="text-xs text-white/40 mt-1">{totalCost > 0 ? ((totalWater/totalCost)*100).toFixed(1) : 0}% of total</div>
         </div>
       </div>
 
       <ChartCard
         title="Monthly Cost Trend (AED)"
-        subtitle="From real consumption_records — electricity vs gas cost split"
+        subtitle="From real consumption_records — electricity, gas & water cost split"
+        csvData={() => [
+          ['Month','Electricity (AED)','Gas (AED)','Water (AED)','Total (AED)'],
+          ...monthlyData.map(r => [r.month, r.electricity, r.gas, r.water, r.total]),
+        ]}
+        csvFilename="monthly-cost-trend.csv"
         table={
           <table className="w-full">
-            <thead><tr>{['Month','Electricity','Gas','Total'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
+            <thead>
+              <tr>{['Month','Electricity','Gas','Water','Total'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr>
+              <tr className="bg-bg-primary/70 border-b-2 border-border-default text-[10px]">
+                <td className="tbl-td font-bold text-white/40">Total</td>
+                <td className="tbl-td font-bold font-mono text-blue-300">{monthlyData.reduce((a,r)=>a+r.electricity,0).toLocaleString()}</td>
+                <td className="tbl-td font-bold font-mono text-amber-300">{monthlyData.reduce((a,r)=>a+r.gas,0).toLocaleString()}</td>
+                <td className="tbl-td font-bold font-mono text-cyan-300">{monthlyData.reduce((a,r)=>a+r.water,0).toLocaleString()}</td>
+                <td className="tbl-td font-bold font-mono text-white">{monthlyData.reduce((a,r)=>a+r.total,0).toLocaleString()}</td>
+              </tr>
+            </thead>
             <tbody>
               {monthlyData.map(row=>(
                 <tr key={row.month} className="tbl-row">
                   <td className="tbl-td text-white/70">{row.month}</td>
                   <td className="tbl-td font-mono text-blue-300">{row.electricity.toLocaleString()}</td>
                   <td className="tbl-td font-mono text-amber-300">{row.gas.toLocaleString()}</td>
+                  <td className="tbl-td font-mono text-cyan-300">{row.water.toLocaleString()}</td>
                   <td className="tbl-td font-mono text-white font-semibold">{row.total.toLocaleString()}</td>
                 </tr>
               ))}
@@ -297,10 +334,11 @@ function CostSummaryTab({ tenantId, currencySymbol }: { tenantId: string; curren
             <XAxis dataKey="month" tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false}
               tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-            <Tooltip contentStyle={TT} formatter={(v: number, n: string) => [`${currencySymbol} ${v.toLocaleString()}`, n === 'electricity' ? 'Electricity' : 'Gas']} />
-            <Legend wrapperStyle={{ fontSize:10 }} formatter={v => v === 'electricity' ? 'Electricity' : 'Gas'} />
-            <Bar dataKey="electricity" name="electricity" stackId="a" fill="#3b82f6" opacity={0.85} radius={[0,0,0,0]} maxBarSize={32} />
-            <Bar dataKey="gas"         name="gas"         stackId="a" fill="#f59e0b" opacity={0.85} radius={[3,3,0,0]} maxBarSize={32} />
+            <Tooltip contentStyle={TT} formatter={(v: number, n: string) => [`${currencySymbol} ${v.toLocaleString()}`, n === 'electricity' ? 'Electricity' : n === 'gas' ? 'Gas' : 'Water']} />
+            <Legend wrapperStyle={{ fontSize:10, cursor:'pointer' }} formatter={v => v === 'electricity' ? 'Electricity' : v === 'gas' ? 'Gas' : 'Water'} onClick={onLegendClick} />
+            <Bar dataKey="electricity" name="electricity" stackId="a" fill="#3b82f6" opacity={0.85} radius={[0,0,0,0]} maxBarSize={32} hide={isHidden('electricity')} />
+            <Bar dataKey="gas"         name="gas"         stackId="a" fill="#f59e0b" opacity={0.85} radius={[0,0,0,0]} maxBarSize={32} hide={isHidden('gas')} />
+            <Bar dataKey="water"       name="water"       stackId="a" fill="#06b6d4" opacity={0.85} radius={[3,3,0,0]} maxBarSize={32} hide={isHidden('water')} />
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
@@ -314,6 +352,11 @@ function CostSummaryTab({ tenantId, currencySymbol }: { tenantId: string; curren
             <thead>
               <tr className="border-b border-border-subtle">
                 {['Site','Total Cost (AED)','% of Portfolio'].map(h => <th key={h} className="tbl-th">{h}</th>)}
+              </tr>
+              <tr className="bg-bg-primary/70 border-b-2 border-border-default text-[10px]">
+                <td className="tbl-td font-bold text-white/40">Total ({siteCosts.length} sites)</td>
+                <td className="tbl-td font-bold font-mono text-white text-right">{totalCost.toLocaleString()}</td>
+                <td className="tbl-td font-bold text-white/40 text-right">100%</td>
               </tr>
             </thead>
             <tbody>
@@ -393,9 +436,29 @@ function DeviationsTab({ tenantId, currencySymbol }: { tenantId: string; currenc
       <ChartCard
         title="Monthly Deviation vs Budget (AED)"
         subtitle="Green = under budget · Red = over budget"
+        csvData={() => [
+          ['Month','Budget (AED)','Actual (AED)','Deviation (AED)','%'],
+          ...monthly.map(r => [r.month, r.budget, r.actual, r.deviation, r.pct.toFixed(1)+'%']),
+        ]}
+        csvFilename="budget-vs-actual.csv"
         table={
           <table className="w-full">
-            <thead><tr>{['Month','Budget (AED)','Actual (AED)','Deviation','%'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr></thead>
+            <thead>
+              <tr>{['Month','Budget (AED)','Actual (AED)','Deviation','%'].map(h=><th key={h} className="tbl-th">{h}</th>)}</tr>
+              <tr className="bg-bg-primary/70 border-b-2 border-border-default text-[10px]">
+                <td className="tbl-td font-bold text-white/40">Total</td>
+                <td className="tbl-td font-bold font-mono text-blue-300">{monthly.reduce((a,r)=>a+r.budget,0).toLocaleString()}</td>
+                <td className="tbl-td font-bold font-mono text-white/70">{monthly.reduce((a,r)=>a+r.actual,0).toLocaleString()}</td>
+                {(() => { const dev = monthly.reduce((a,r)=>a+r.deviation,0); return (
+                  <>
+                    <td className={clsx('tbl-td font-bold font-mono', dev>0?'text-danger-light':'text-success-light')}>{dev>0?'+':''}{dev.toLocaleString()}</td>
+                    <td className={clsx('tbl-td font-bold', dev>0?'text-danger-light':'text-success-light')}>
+                      {monthly.reduce((a,r)=>a+r.budget,0) > 0 ? `${dev>0?'+':''}${((dev/monthly.reduce((a,r)=>a+r.budget,0))*100).toFixed(1)}%` : '—'}
+                    </td>
+                  </>
+                )})()}
+              </tr>
+            </thead>
             <tbody>
               {monthly.map(row=>(
                 <tr key={row.month} className="tbl-row">
@@ -439,19 +502,25 @@ function CostReportTab({ tenantId, currencySymbol }: { tenantId: string; currenc
   const [loading, setLoading]  = useState(true)
   const [chartData, setChart]  = useState<any[]>([])
   const [yearTotal, setYearTotal] = useState(0)
+  const { onLegendClick, isHidden } = useLegendToggle()
 
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const records = await fetchConsumption(tenantId)
-      const monthly = groupByMonth(records)
+      const [records, conns] = await Promise.all([fetchConsumption(tenantId), fetchConnections(tenantId)])
+      const pm = buildProductMap(conns)
+      const monthly = groupByMonth(records, pm)
 
-      const data = monthly.map(m => ({
-        month:   new Date(m.month + '-01').toLocaleString('default', { month:'short', year:'2-digit' }),
-        cost:    Math.round(m.cost),
-        elec:    Math.round(m.cost * (m.elec / (m.elec + m.gas || 1))),
-        gas:     Math.round(m.cost * (m.gas  / (m.elec + m.gas || 1))),
-      }))
+      const data = monthly.map(m => {
+        const denom = m.elec + m.gas + m.water || 1
+        return {
+          month:   new Date(m.month + '-01').toLocaleString('default', { month:'short', year:'2-digit' }),
+          cost:    Math.round(m.cost),
+          elec:    Math.round(m.cost * (m.elec  / denom)),
+          gas:     Math.round(m.cost * (m.gas   / denom)),
+          water:   Math.round(m.cost * (m.water / denom)),
+        }
+      })
       setChart(data)
       setYearTotal(data.reduce((a, d) => a + d.cost, 0))
       setLoading(false)
@@ -467,8 +536,13 @@ function CostReportTab({ tenantId, currencySymbol }: { tenantId: string; currenc
         <div className="text-[11px] text-white/35 mb-0.5">Financial Reports</div>
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-white">Cost Report</h2>
-          <button className="flex items-center gap-1.5 text-xs border border-border-default text-white/60 hover:text-white px-3 py-1.5 rounded-lg transition-all">
-            <Download size={12} /> Download
+          <button
+            onClick={() => downloadCSV('cost-report.csv', [
+              ['Month','Electricity (AED)','Gas (AED)','Water (AED)','Total (AED)'],
+              ...chartData.map((r: any) => [r.month, r.elec, r.gas, r.water ?? 0, r.cost]),
+            ])}
+            className="flex items-center gap-1.5 text-xs border border-border-default text-white/60 hover:text-white px-3 py-1.5 rounded-lg transition-all">
+            <Download size={12} /> Download CSV
           </button>
         </div>
       </div>
@@ -480,10 +554,11 @@ function CostReportTab({ tenantId, currencySymbol }: { tenantId: string; currenc
             <XAxis dataKey="month" tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill:'#5a6385', fontSize:10 }} axisLine={false} tickLine={false}
               tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
-            <Tooltip contentStyle={TT} formatter={(v: number, n: string) => [`${currencySymbol} ${v.toLocaleString()}`, n === 'elec' ? 'Electricity' : n === 'gas' ? 'Gas' : 'Total']} />
-            <Legend wrapperStyle={{ fontSize:10, paddingTop:8 }} formatter={v => v === 'elec' ? 'Electricity' : 'Gas'} />
-            <Bar dataKey="elec" name="elec" stackId="a" fill="#3b82f6" opacity={0.9} radius={[0,0,0,0]} maxBarSize={40} />
-            <Bar dataKey="gas"  name="gas"  stackId="a" fill="#f59e0b" opacity={0.9} radius={[3,3,0,0]} maxBarSize={40} />
+            <Tooltip contentStyle={TT} formatter={(v: number, n: string) => [`${currencySymbol} ${v.toLocaleString()}`, n === 'elec' ? 'Electricity' : n === 'gas' ? 'Gas' : n === 'water' ? 'Water' : 'Total']} />
+            <Legend wrapperStyle={{ fontSize:10, paddingTop:8, cursor:'pointer' }} formatter={v => v === 'elec' ? 'Electricity' : v === 'gas' ? 'Gas' : 'Water'} onClick={onLegendClick} />
+            <Bar dataKey="elec"  name="elec"  stackId="a" fill="#3b82f6" opacity={0.9} radius={[0,0,0,0]} maxBarSize={40} hide={isHidden('elec')} />
+            <Bar dataKey="gas"   name="gas"   stackId="a" fill="#f59e0b" opacity={0.9} radius={[0,0,0,0]} maxBarSize={40} hide={isHidden('gas')} />
+            <Bar dataKey="water" name="water" stackId="a" fill="#06b6d4" opacity={0.9} radius={[3,3,0,0]} maxBarSize={40} hide={isHidden('water')} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -504,6 +579,10 @@ function CostReportTab({ tenantId, currencySymbol }: { tenantId: string; currenc
             <tr className="border-b border-border-subtle">
               <td className="tbl-td font-semibold text-amber-300">Gas</td>
               {chartData.map((d, i) => <td key={i} className="tbl-td text-right text-amber-300">{d.gas.toLocaleString()}</td>)}
+            </tr>
+            <tr className="border-b border-border-subtle">
+              <td className="tbl-td font-semibold text-cyan-300">Water</td>
+              {chartData.map((d, i) => <td key={i} className="tbl-td text-right text-cyan-300">{(d.water ?? 0).toLocaleString()}</td>)}
             </tr>
             <tr className="border-b border-border-default bg-bg-card/40">
               <td className="tbl-td font-bold text-white">Total</td>

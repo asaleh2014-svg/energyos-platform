@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useLegendToggle } from '@/lib/useLegendToggle'
 import { Topbar } from '@/components/layout/Topbar'
 import { StatCard } from '@/components/dashboard/StatCard'
 import { UAEMap } from '@/components/dashboard/UAEMap'
@@ -14,8 +15,8 @@ import {
 import clsx from 'clsx'
 import { useTenantId } from '@/lib/auth'
 import {
-  fetchSites, fetchConnections, fetchConsumption,
-  groupByMonth, sumConsumption, co2Tonnes, monthsAgo,
+  fetchSites, fetchConnections, fetchConsumption, fetchBuildings,
+  groupByMonth, sumConsumption, co2Tonnes, monthsAgo, buildProductMap,
 } from '@/lib/dbQueries'
 
 const TT = { background: '#111520', border: '1px solid #ffffff20', borderRadius: 8, fontSize: 12 }
@@ -49,28 +50,33 @@ export default function Dashboard() {
   const [pinned,          setPinned]          = useState<WidgetId[]>(DEFAULT_PINNED)
   const [configure,       setConfigure]       = useState(false)
   const [consumptionUnit, setConsumptionUnit] = useState<'kWh' | 'MWh'>('kWh')
+  const { onLegendClick: onConsLegend, isHidden: isConsHidden } = useLegendToggle()
 
   // DB state
   const [sites,       setSites]       = useState<any[]>([])
+  const [buildings,   setBuildings]   = useState<any[]>([])
   const [connections, setConnections] = useState<any[]>([])
   const [monthlyData, setMonthlyData] = useState<any[]>([])
-  const [totals,      setTotals]      = useState({ elec: 0, gas: 0, cost: 0 })
+  const [totals,      setTotals]      = useState({ elec: 0, gas: 0, water: 0, cost: 0 })
   const [loading,     setLoading]     = useState(true)
 
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const [s, c, rec] = await Promise.all([
+      const [s, b, c, rec] = await Promise.all([
         fetchSites(tenantId),
+        fetchBuildings(tenantId),
         fetchConnections(tenantId),
         fetchConsumption(tenantId),
       ])
 
       setSites(s)
+      setBuildings(b)
       setConnections(c)
-      const grouped = groupByMonth(rec)
+      const pm = buildProductMap(c)
+      const grouped = groupByMonth(rec, pm)
       setMonthlyData(grouped)
-      setTotals(sumConsumption(rec))
+      setTotals(sumConsumption(rec, pm))
       setLoading(false)
     }
     load()
@@ -89,11 +95,10 @@ export default function Dashboard() {
   const co2Est = co2Tonnes(totals.elec, totals.gas)
 
   const consumptionChartData = monthlyData.map(m => ({
-    month: m.month.slice(5), // MM
-    electricity: consumptionUnit === 'MWh'
-      ? parseFloat((m.elec / 1000).toFixed(2))
-      : Math.round(m.elec),
-    gas: Math.round(m.gas),
+    month: m.month.slice(5),
+    electricity: consumptionUnit === 'MWh' ? parseFloat((m.elec / 1000).toFixed(2)) : Math.round(m.elec),
+    gas:   Math.round(m.gas),
+    water: Math.round(m.water),
   }))
 
   // Data quality: synthetic per-month quality score derived from record completeness
@@ -190,9 +195,10 @@ export default function Dashboard() {
                         <XAxis dataKey="month" tick={{ fill: '#5a6385', fontSize: 10 }} axisLine={false} tickLine={false} />
                         <YAxis tick={{ fill: '#5a6385', fontSize: 10 }} axisLine={false} tickLine={false} />
                         <Tooltip contentStyle={TT} />
-                        <Legend wrapperStyle={{ fontSize: 11, color: '#5a6385' }} />
-                        <Bar dataKey="electricity" name={`Electricity (${consumptionUnit})`} fill="#3b82f6" opacity={0.8} radius={[3,3,0,0]} />
-                        <Bar dataKey="gas"         name="Gas (m³)"                           fill="#f59e0b" opacity={0.8} radius={[3,3,0,0]} />
+                        <Legend wrapperStyle={{ fontSize: 11, color: '#5a6385', cursor: 'pointer' }} onClick={onConsLegend} />
+                        <Bar dataKey="electricity" name={`Electricity (${consumptionUnit})`} fill="#3b82f6" opacity={0.8} radius={[3,3,0,0]} hide={isConsHidden('electricity')} />
+                        <Bar dataKey="gas"         name="Gas (m³)"                           fill="#f59e0b" opacity={0.8} radius={[3,3,0,0]} hide={isConsHidden('gas')} />
+                        <Bar dataKey="water"       name="Water (m³)"                         fill="#06b6d4" opacity={0.8} radius={[3,3,0,0]} hide={isConsHidden('water')} />
                       </BarChart>
                     </ResponsiveContainer>
                   </WidgetCard>
@@ -200,7 +206,11 @@ export default function Dashboard() {
                 {has('map') && (
                   <WidgetCard title="Portfolio Map" onPin={() => toggleWidget('map')} pinned
                     action={<button onClick={() => navigate('/sites')} className="text-xs text-accent-hover hover:underline">All sites →</button>}>
-                    <UAEMap sites={sites} />
+                    <UAEMap
+                      sites={sites}
+                      buildings={buildings}
+                      onBuildingClick={id => navigate(`/buildings/${id}`)}
+                    />
                   </WidgetCard>
                 )}
               </div>
@@ -296,8 +306,8 @@ export default function Dashboard() {
                         <td className="tbl-td text-white font-medium">{c.site_name}</td>
                         <td className="tbl-td ean">{c.ean_code}</td>
                         <td className="tbl-td">
-                          <span className={c.connection_type === 'Electricity' ? 'type-elec' : 'type-gas'}>
-                            {c.connection_type === 'Electricity' ? '⚡' : '🔥'} {c.connection_type}
+                          <span className={c.connection_type === 'Electricity' ? 'type-elec' : c.connection_type === 'Water' ? 'type-water' : 'type-gas'}>
+                            {c.connection_type === 'Electricity' ? '⚡' : c.connection_type === 'Water' ? '💧' : '🔥'} {c.connection_type}
                           </span>
                         </td>
                         <td className="tbl-td">{c.capacity}</td>
